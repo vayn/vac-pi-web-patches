@@ -1,7 +1,7 @@
 From f054ace1141d68304a9eab36cfcdb703bdef9e30 Mon Sep 17 00:00:00 2001
 From: pi-web contributor <contributor@example.com>
 Date: Sat, 3 Oct 2026 15:35:05 +0800
-Subject: [PATCH 4/4] =?UTF-8?q?feat(pi-web):=20=E6=A8=A1=E5=9E=8B=E8=83=BD?=
+Subject: [PATCH 4/5] =?UTF-8?q?feat(pi-web):=20=E6=A8=A1=E5=9E=8B=E8=83=BD?=
  =?UTF-8?q?=E5=8A=9B=E5=9B=BE=E6=A0=87=E4=B8=8E=E8=B4=B9=E7=94=A8=E5=80=8D?=
  =?UTF-8?q?=E7=8E=87=E5=BE=BD=E6=A0=87=EF=BC=88=E6=95=B0=E6=8D=AE=E6=BA=90?=
  =?UTF-8?q?=20models.json=20+=20model-caps.json=EF=BC=89?=
