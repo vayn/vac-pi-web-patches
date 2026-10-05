@@ -1,0 +1,25 @@
+{
+  "name": "pi-web-patches",
+  "version": "1.0.0",
+  "description": "Enhancement patch series for pi-web v0.10.0: compaction message collapse, pnpm lockfile ignore, dialog height fix, model capability icons and rate badges, and markdown table zoom with fullscreen view.",
+  "keywords": [
+    "pi-package",
+    "pi-web",
+    "patch-series"
+  ],
+  "license": "MIT",
+  "files": [
+    "patches/",
+    "docs/",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "peerDependencies": {
+    "@agegr/pi-web": "^0.10.0"
+  },
+  "peerDependenciesMeta": {
+    "@agegr/pi-web": {
+      "optional": true
+    }
+  }
+}
