@@ -27,13 +27,17 @@
 > `.markdown-table-wrap`, `.table-zoom-*` and dialog rules are extracted verbatim from the
 > patched `app/globals.css`; the zoom-button SVG is the patch's own four-segment path).
 > They show what the patched UI produces, not an artist's impression of it.
+>
+> **Bilingual**: the screenshots are shipped in both languages — `docs/screenshots/en/`
+> (used by this README) and `docs/screenshots/zh-CN/` (used by `README.zh-CN.md`).
+> Same rendering, same data, only the annotation text differs.
 
 ### 0001 — compaction messages collapse by default
 
 Collapsed state shows only a chevron, the summary's first line and the timestamp; clicking
 (`aria-expanded`) reveals the full summary plus the read/modified file list.
 
-![compaction collapse](docs/screenshots/0001-compaction-collapse.png)
+![compaction collapse](docs/screenshots/en/0001-compaction-collapse.png)
 
 ### 0003 — long questions no longer squeeze the options area
 
@@ -41,7 +45,7 @@ Left: before (`maxHeight` alone does not give the dialog a definite height, so t
 question compresses the options — options B and C are cut off). Right: after
 (`height: min(760px, 100%)`, all options visible).
 
-![dialog height](docs/screenshots/0003-dialog-height.png)
+![dialog height](docs/screenshots/en/0003-dialog-height.png)
 
 ### 0004 — model capability icons and rate badges
 
@@ -49,21 +53,21 @@ Capability icons show on/off state (bright = supported, dimmed = not), and the r
 distinguishes free from paid multipliers. Rendered in both themes because the badges use
 theme variables.
 
-![model caps badges](docs/screenshots/0004-model-caps-badges.png)
+![model caps badges](docs/screenshots/en/0004-model-caps-badges.png)
 
-![model caps badges, dark theme](docs/screenshots/0004-model-caps-badges-dark.png)
+![model caps badges, dark theme](docs/screenshots/en/0004-model-caps-badges-dark.png)
 
 ### 0005 — table zoom button and fullscreen view
 
 **a)** The zoom button floats at the table's top-right (desktop reveals it on hover; touch
 devices keep it resident, since there is no hover):
 
-![table zoom button](docs/screenshots/0005-table-zoom-button.png)
+![table zoom button](docs/screenshots/en/0005-table-zoom-button.png)
 
 **b)** Fullscreen view: a long cell **wraps onto a second line** instead of forcing the
 whole table to one-line width, so the row stays readable without horizontal scrolling.
 
-![table zoom fullscreen](docs/screenshots/0005-table-zoom-fullscreen.png)
+![table zoom fullscreen](docs/screenshots/en/0005-table-zoom-fullscreen.png)
 
 ## 3. Why patches instead of pull requests
 

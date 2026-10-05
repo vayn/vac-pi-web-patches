@@ -23,38 +23,41 @@
 > **方法说明**：以下不是示意图。每张图均由无头浏览器渲染，**用的是补丁后源码里的真实 CSS 规则与真实组件 DOM 结构**
 > （`.markdown-table-wrap`、`.table-zoom-*`、dialog 规则均逐字取自补丁后的 `app/globals.css`，
 > 放大按钮 SVG 即补丁自带的四段对角箭头 path）。它们展示的是补丁界面**实际产出**，不是手绘印象。
+>
+> **双语**：截图分语言交付——`docs/screenshots/zh-CN/`（本 README 引用）与
+> `docs/screenshots/en/`（`README.md` 引用）。渲染与数据完全一致，仅标注文字不同。
 
 ### 0001 —— compaction 消息默认折叠
 
 折叠态只显示箭头、摘要首行与时间；点击（`aria-expanded`）后展开完整摘要与读/改文件清单。
 
-![compaction 折叠](docs/screenshots/0001-compaction-collapse.png)
+![compaction 折叠](docs/screenshots/zh-CN/0001-compaction-collapse.png)
 
 ### 0003 —— 长提问不再挤扁选项区
 
 左：修复前（仅 `maxHeight` 不构成确定高度，长提问压缩选项区，方案 B/C 被截断）；
 右：修复后（`height: min(760px, 100%)`，三个方案均完整可见）。
 
-![对话框高度](docs/screenshots/0003-dialog-height.png)
+![对话框高度](docs/screenshots/zh-CN/0003-dialog-height.png)
 
 ### 0004 —— 模型能力图标与费用倍率徽标
 
 能力图标区分支持与否（亮 = 支持，暗 = 不支持），倍率徽标区分免费与付费；同时给出亮/暗两套主题，
 因为徽标取的是主题变量。
 
-![能力图标与倍率徽标](docs/screenshots/0004-model-caps-badges.png)
+![能力图标与倍率徽标](docs/screenshots/zh-CN/0004-model-caps-badges.png)
 
-![能力图标与倍率徽标（暗色）](docs/screenshots/0004-model-caps-badges-dark.png)
+![能力图标与倍率徽标（暗色）](docs/screenshots/zh-CN/0004-model-caps-badges-dark.png)
 
 ### 0005 —— 表格放大按钮与全屏查看
 
 **a）** 放大按钮浮于表格右上角（桌面态 hover 显形；触屏无 hover，故常驻可见）：
 
-![表格放大按钮](docs/screenshots/0005-table-zoom-button.png)
+![表格放大按钮](docs/screenshots/zh-CN/0005-table-zoom-button.png)
 
 **b）** 全屏态：较长单元格**自动折到第二行**，而不是把整张表撑成一行宽，无需横向滚动即可阅读。
 
-![表格全屏放大](docs/screenshots/0005-table-zoom-fullscreen.png)
+![表格全屏放大](docs/screenshots/zh-CN/0005-table-zoom-fullscreen.png)
 
 ## 三、为什么是补丁而不是 PR
 
