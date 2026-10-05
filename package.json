@@ -10,6 +10,7 @@
   "license": "MIT",
   "files": [
     "patches/",
+    "docs/",
     "README.md",
     "README.zh-CN.md"
   ],
