@@ -1,0 +1,353 @@
+From 1de5581f90d7b1491e4434f91466d368502becfb Mon Sep 17 00:00:00 2001
+From: pi-web contributor <contributor@example.com>
+Date: Mon, 5 Oct 2026 15:43:23 +0800
+Subject: [PATCH 5/5] =?UTF-8?q?feat(pi-web):=20markdown=20=E8=A1=A8?=
+ =?UTF-8?q?=E6=A0=BC=E6=94=BE=E5=A4=A7=E6=8C=89=E9=92=AE=E4=B8=8E=E5=85=A8?=
+ =?UTF-8?q?=E5=B1=8F=E6=9F=A5=E7=9C=8B?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+业主指令 2026-10-04：给 pi-web 增加表格放大按钮和实现放大功能，
+视觉与交互参考某移动端表格组件（截图逆向）：放大图标为四段双向
+对角箭头，全屏态为整页铺满、表头保留。
+
+实现（对齐本仓 ImagePreview 既有范式，避免另起一套）：
+- 新增 components/TableZoom.tsx：<dialog> + ::backdrop + 关闭按钮，
+  关闭时恢复 body overflow 并把焦点还给触发按钮，Esc / 点遮罩空白均可关闭。
+- MarkdownBody 的 table() 渲染器改走 TableZoom（原 .markdown-table-wrap
+  的 <table>{children}</table> 结构保持不变，仅外层包 Zoom）。
+- 放大按钮浮于表格右上角：桌面 hover 显现、触屏（hover:none）常驻——
+  依据该移动端组件的结论「触屏无 hover，图标须常驻可见」。
+- 三语 i18n 键 chat.zoomTable（en/zh-CN/zh-TW）。
+
+全屏态单元格折行（业主 2026-10-05 反馈「单元格应当尽可能自动折行，
+而不是全部都是一行到底」）：
+- 上游 .markdown-table-wrap > table 为 width:max-content，即表格按内容
+  自然宽度铺开、由外层横向滚动——非全屏场景合理，全屏场景正是问题源：
+  实测 1 列超长文本表格宽 2204px、14 列表格宽 2964px（容器仅 1198px），
+  读者须横向滚动才能读完整行。
+- 修复：在 dialog 内以 .table-zoom-dialog-scroll .table-zoom-dialog-table
+  > table 覆盖为 width:100% + table-layout:auto，单元格 white-space:normal
+  + overflow-wrap:anywhere（后者覆盖 URL/哈希等不可断长 token），
+  并给列 min-width:6ch 避免多列表被挤成竖排单字。
+- 特异性说明：上游选择器与本块同为 (0,1,1)，仅靠源码顺序覆盖是脆弱的，
+  故用 .table-zoom-dialog-scroll 前缀抬到 (0,2,1) 以确保稳定覆盖。
+- 修复后实测：两种场景表格宽度均收敛到容器宽 1198px（折行 3 行 / 5 行），
+  横向滚动消失。
+---
+ app/globals.css             | 106 ++++++++++++++++++++++++++++++++
+ components/MarkdownBody.tsx |   7 +--
+ components/TableZoom.tsx    | 119 ++++++++++++++++++++++++++++++++++++
+ lib/i18n/messages/en.ts     |   1 +
+ lib/i18n/messages/zh-CN.ts  |   1 +
+ lib/i18n/messages/zh-TW.ts  |   1 +
+ 6 files changed, 230 insertions(+), 5 deletions(-)
+ create mode 100644 components/TableZoom.tsx
+
+diff --git a/app/globals.css b/app/globals.css
+index 3399e0a..929f434 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -863,6 +863,112 @@ pre, code {
+   color: color-mix(in srgb, var(--text) 88%, var(--text-muted));
+   font-weight: 650;
+ }
++
++/* ---- 表格放大（业主 2026-10-04；组件 components/TableZoom.tsx）----
++   触发按钮浮于表格右上角：桌面 hover 才完全显现，触屏（无 hover）保持低透明度常驻可点——
++   参照该移动端组件的结论「触屏无 hover，图标须常驻可见」。 */
++.table-zoom {
++  position: relative;
++}
++.table-zoom-button {
++  position: absolute;
++  top: 6px;
++  right: 6px;
++  z-index: 2;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 26px;
++  height: 26px;
++  padding: 0;
++  border: 1px solid var(--border);
++  border-radius: 6px;
++  background: var(--bg-panel);
++  color: var(--text-muted);
++  cursor: zoom-in;
++  opacity: 0.55;
++  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
++}
++.table-zoom-button:hover,
++.table-zoom-button:focus-visible {
++  opacity: 1;
++  color: var(--text);
++  background: var(--bg-hover);
++}
++@media (hover: none) {
++  /* 触屏无 hover：常驻可点，避免「看不见也点不到」 */
++  .table-zoom-button { opacity: 0.85; }
++}
++
++.table-zoom-dialog {
++  position: fixed;
++  inset: 0;
++  width: 100vw;
++  max-width: none;
++  height: 100dvh;
++  max-height: none;
++  margin: 0;
++  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
++           max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
++  border: 0;
++  background: transparent;
++  color: var(--text);
++  overflow: hidden;
++}
++.table-zoom-dialog[open] { display: block; }
++.table-zoom-dialog::backdrop { background: rgba(0, 0, 0, 0.72); }
++
++/* 全屏态：表格**优先自动折行**（见下），纵向溢出时滚动；
++   极宽的窄列多列表（如 20 列）仍会超出宽度→由本容器的 overflow:auto 提供横向滚动兑底。 */
++.table-zoom-dialog-scroll {
++  width: 100%;
++  height: 100%;
++  overflow: auto;
++  background: var(--bg);
++  border: 1px solid var(--border);
++  border-radius: 8px;
++}
++.table-zoom-dialog-table {
++  margin: 0;
++  border: 0;
++  border-radius: 0;
++  /* 取消 .markdown-table-wrap 的 overflow-x:auto，改由外层 scroll 容器统一双向滚动 */
++  overflow: visible;
++}
++/* 上游 .markdown-table-wrap > table 是 width:max-content（窄框内不折行、横向滚动）——
++   全屏态的目标相反：**优先自动折行**，让单元格在可用宽度内换行，而不是一行到底。
++   注意特异性：上游选择器与本块同为 (0,1,1)，因此**不能只靠源码顺序**（脆弱）；
++   此处用 .table-zoom-dialog-scroll 前缀把特异度抬到 (0,2,1)，确保稳定覆盖。 */
++.table-zoom-dialog-scroll .table-zoom-dialog-table > table {
++  width: 100%;
++  table-layout: auto;
++}
++.table-zoom-dialog-scroll .table-zoom-dialog-table th,
++.table-zoom-dialog-scroll .table-zoom-dialog-table td {
++  /* wrap-anywhere 同上游 .markdown-body 的断词策略；normal 允许在空格处折行 */
++  white-space: normal;
++  overflow-wrap: anywhere;
++  /* 窄屏下给列一个可读下限，避免多列表被挤成竖排单字 */
++  min-width: 6ch;
++}
++
++.table-zoom-close {
++  position: absolute;
++  top: max(12px, env(safe-area-inset-top));
++  right: max(12px, env(safe-area-inset-right));
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 32px;
++  height: 32px;
++  padding: 0;
++  border: 1px solid var(--border);
++  border-radius: 8px;
++  background: var(--bg-panel);
++  color: var(--text);
++  cursor: pointer;
++}
++.table-zoom-close:hover { background: var(--bg-hover); }
+ .markdown-body tbody tr:nth-child(even) td { background: var(--bg-subtle); }
+ .markdown-body hr {
+   border: none;
+diff --git a/components/MarkdownBody.tsx b/components/MarkdownBody.tsx
+index f918c4b..57dd26e 100644
+--- a/components/MarkdownBody.tsx
++++ b/components/MarkdownBody.tsx
+@@ -7,6 +7,7 @@ import { encodeFilePathForApi } from "@/lib/file-paths";
+ import { markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+ import { ImagePreview } from "./ImagePreview";
+ import { MermaidBlock, CodeBlock } from "./MermaidBlock";
++import { TableZoom } from "./TableZoom";
+ 
+ const MarkdownLinkContext = createContext(false);
+ 
+@@ -111,11 +112,7 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
+       return <MarkdownImage cwd={cwd} {...props} />;
+     },
+     table({ children }) {
+-      return (
+-        <div className="markdown-table-wrap">
+-          <table>{children}</table>
+-        </div>
+-      );
++      return <TableZoom>{children}</TableZoom>;
+     },
+   }), [cwd, isStreaming, onOpenFile]);
+ 
+diff --git a/components/TableZoom.tsx b/components/TableZoom.tsx
+new file mode 100644
+index 0000000..ab5d985
+--- /dev/null
++++ b/components/TableZoom.tsx
+@@ -0,0 +1,119 @@
++"use client";
++
++import { useEffect, useRef, useState } from "react";
++import { useI18n } from "@/hooks/useI18n";
++
++/**
++ * 表格放大（业主 2026-10-04 指令）：为 markdown 表格提供「放大」按钮与全屏查看。
++ *
++ * 设计对齐本仓 ImagePreview（components/ImagePreview.tsx）：
++ *   - 触发按钮 → <dialog> → ::backdrop + 关闭按钮；
++ *   - 关闭时恢复 body overflow 并把焦点还给触发按钮（无障碍）；
++ *   - Esc / 点击遮罩空白关闭。
++ *
++ * 与 ImagePreview 的差异（表格特有的两点）：
++ *   1. 按钮浮在表格右上角而非包裹整个表格——表格本身可横向滚动、可交互，
++ *      包裹成 <button> 会破坏滚动与选区（且 button 内嵌 table 不合法）。
++ *   2. 全屏态表格需双向滚动（宽表横滚 + 长表纵滚），故 dialog 内用
++ *      .table-zoom-dialog-scroll 承载，而非 ImagePreview 的居中 contain。
++ */
++interface TableZoomProps {
++  children: React.ReactNode;
++}
++
++export function TableZoom({ children }: TableZoomProps) {
++  const { t } = useI18n();
++  const [open, setOpen] = useState(false);
++  const triggerRef = useRef<HTMLButtonElement>(null);
++  const dialogRef = useRef<HTMLDialogElement>(null);
++  const closeButtonRef = useRef<HTMLButtonElement>(null);
++
++  useEffect(() => {
++    if (!open) return;
++    const dialog = dialogRef.current;
++    if (!dialog) return;
++    const trigger = triggerRef.current;
++
++    const previousOverflow = document.body.style.overflow;
++    document.body.style.overflow = "hidden";
++    dialog.showModal();
++    closeButtonRef.current?.focus({ preventScroll: true });
++
++    return () => {
++      document.body.style.overflow = previousOverflow;
++      if (dialog.open) dialog.close();
++      if (trigger?.isConnected) {
++        trigger.focus({ preventScroll: true });
++      }
++    };
++  }, [open]);
++
++  const closeZoom = () => {
++    if (dialogRef.current?.open) dialogRef.current.close();
++    setOpen(false);
++  };
++
++  return (
++    <div className="table-zoom">
++      <div className="markdown-table-wrap">
++        <table>{children}</table>
++      </div>
++      <button
++        ref={triggerRef}
++        type="button"
++        className="table-zoom-button"
++        onClick={() => setOpen(true)}
++        aria-label={t("chat.zoomTable")}
++        aria-haspopup="dialog"
++        aria-expanded={open}
++        title={t("chat.zoomTable")}
++      >
++        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
++          <path d="M9.4 3.2H4.6a1.4 1.4 0 0 0-1.4 1.4v4.8" />
++          <path d="M14.6 3.2h4.8a1.4 1.4 0 0 1 1.4 1.4v4.8" />
++          <path d="M20.8 14.6v4.8a1.4 1.4 0 0 1-1.4 1.4h-4.8" />
++          <path d="M3.2 14.6v4.8a1.4 1.4 0 0 0 1.4 1.4h4.8" />
++        </svg>
++      </button>
++      {open && (
++        <dialog
++          ref={dialogRef}
++          className="table-zoom-dialog"
++          aria-label={t("chat.zoomTable")}
++          onCancel={(event) => {
++            event.preventDefault();
++            event.stopPropagation();
++            closeZoom();
++          }}
++          onKeyDown={(event) => {
++            if (event.key !== "Escape") return;
++            event.preventDefault();
++            event.stopPropagation();
++            closeZoom();
++          }}
++          onClick={(event) => {
++            if (event.target === event.currentTarget) closeZoom();
++          }}
++        >
++          <div className="table-zoom-dialog-scroll">
++            <div className="markdown-table-wrap table-zoom-dialog-table">
++              <table>{children}</table>
++            </div>
++          </div>
++          <button
++            ref={closeButtonRef}
++            type="button"
++            className="table-zoom-close"
++            onClick={closeZoom}
++            aria-label={t("chat.close")}
++            title={t("chat.close")}
++          >
++            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
++              <path d="M6 6l12 12M18 6 6 18" />
++            </svg>
++          </button>
++        </dialog>
++      )}
++    </div>
++  );
++}
+diff --git a/lib/i18n/messages/en.ts b/lib/i18n/messages/en.ts
+index 0bb5253..3614c99 100644
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -428,6 +428,7 @@ export const enLocale: LocalePlugin = {
+     "chat.quoteForkFailed": "Unable to create a branch from this message.",
+     "chat.attachImage": "Attach image",
+     "chat.previewImage": "Preview image",
++    "chat.zoomTable": "Zoom table",
+     "chat.filterModels": "Filter models…",
+     "chat.noMatchingModels": "No matching models",
+     "chat.saveDefaultModel": "Use and save as default for new chats",
+diff --git a/lib/i18n/messages/zh-CN.ts b/lib/i18n/messages/zh-CN.ts
+index eabdadb..cc97c15 100644
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -428,6 +428,7 @@ export const zhCNLocale: LocalePlugin = {
+     "chat.quoteForkFailed": "无法从这条消息创建分支。",
+     "chat.attachImage": "附加图片",
+     "chat.previewImage": "预览图片",
++    "chat.zoomTable": "放大表格",
+     "chat.filterModels": "筛选模型…",
+     "chat.noMatchingModels": "没有匹配的模型",
+     "chat.saveDefaultModel": "使用并设为新会话默认模型",
+diff --git a/lib/i18n/messages/zh-TW.ts b/lib/i18n/messages/zh-TW.ts
+index 3c18dc6..d41fa5e 100644
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -428,6 +428,7 @@ export const zhTWLocale: LocalePlugin = {
+     "chat.quoteForkFailed": "無法從這則訊息建立分支。",
+     "chat.attachImage": "附加圖片",
+     "chat.previewImage": "預覽圖片",
++    "chat.zoomTable": "放大表格",
+     "chat.filterModels": "篩選模型…",
+     "chat.noMatchingModels": "找不到相符的模型",
+     "chat.saveDefaultModel": "使用並設為新工作階段預設模型",
+-- 
+2.47.3
+

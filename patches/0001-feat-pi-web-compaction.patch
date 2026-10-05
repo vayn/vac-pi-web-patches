@@ -1,0 +1,108 @@
+From d5d81a016090e0629c4f6a9ca00765f34d8425be Mon Sep 17 00:00:00 2001
+From: pi-web contributor <contributor@example.com>
+Date: Sat, 3 Oct 2026 15:35:05 +0800
+Subject: [PATCH 1/4] =?UTF-8?q?feat(pi-web):=20compaction=20=E6=8A=98?=
+ =?UTF-8?q?=E5=8F=A0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ components/MessageView.tsx | 57 +++++++++++++++++++++++++++++++++-----
+ 1 file changed, 50 insertions(+), 7 deletions(-)
+
+diff --git a/components/MessageView.tsx b/components/MessageView.tsx
+index 0570a5e..2c013b8 100644
+--- a/components/MessageView.tsx
++++ b/components/MessageView.tsx
+@@ -1632,6 +1632,10 @@ function PairedResult({ text, isEmpty, isError }: {
+ function CompactionMessageView({ message }: { message: CustomMessage }) {
+   const { t } = useI18n();
+   const summary = getMessageText(message.content);
++  // mobile patch：默认折叠，只留标题栏（业主裁定 2026-09-28）。
++  // compaction 摘要在会话中可能很长，手机上会挤占大量滚动空间；
++  // 默认收起、点击标题栏展开，与 pi 的其它折叠块交互一致。
++  const [expanded, setExpanded] = useState(false);
+   const parsedSummary = useMemo(() => parseCompactionSummary(summary), [summary]);
+   const time = formatTime(message.timestamp);
+ 
+@@ -1645,23 +1649,61 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
+           background: "var(--bg)",
+         }}
+       >
+-        <div
++        <button
++          type="button"
++          onClick={() => setExpanded((v) => !v)}
++          aria-expanded={expanded}
+           style={{
+             display: "flex",
+             alignItems: "center",
+             gap: 8,
+-            padding: "7px 10px",
+-            borderBottom: "1px solid var(--border)",
++            width: "100%",
++            padding: "10px 12px",
++            minHeight: 40,
++            border: "none",
++            borderBottom: expanded ? "1px solid var(--border)" : "none",
+             background: "var(--bg-panel)",
+             color: "var(--text-muted)",
++            cursor: "pointer",
++            textAlign: "left",
++            fontFamily: "var(--font-mono)",
++            fontSize: 11,
++            fontWeight: 650,
+           }}
+         >
+-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
+-            compaction
++          <span
++            aria-hidden="true"
++            style={{
++              display: "inline-block",
++              transition: "transform 120ms",
++              transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
++              color: "var(--text-dim)",
++            }}
++          >
++            ▶
+           </span>
+-          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{time}</span>}
+-        </div>
++          <span>compaction</span>
++          {!expanded && parsedSummary.body && (
++            <span
++              style={{
++                marginLeft: 6,
++                flex: 1,
++                minWidth: 0,
++                overflow: "hidden",
++                textOverflow: "ellipsis",
++                whiteSpace: "nowrap",
++                color: "var(--text-dim)",
++                fontWeight: 400,
++                fontFamily: "inherit",
++              }}
++            >
++              {parsedSummary.body.split("\n").find((l) => l.trim())?.trim()}
++            </span>
++          )}
++          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, flexShrink: 0 }}>{time}</span>}
++        </button>
+ 
++        {expanded && (
+         <div style={{ padding: "11px 13px 12px" }}>
+           <div style={{ color: "var(--text)", fontSize: "calc(15px + var(--chat-font-size-offset, 0px))", fontWeight: 700, lineHeight: 1.35 }}>
+              {t("i18n.conversationCompacted")}
+@@ -1676,6 +1718,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
+           )}
+           <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
+         </div>
++        )}
+       </div>
+     </div>
+   );
+-- 
+2.47.3
+

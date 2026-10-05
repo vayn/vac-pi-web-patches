@@ -1,0 +1,300 @@
+From f054ace1141d68304a9eab36cfcdb703bdef9e30 Mon Sep 17 00:00:00 2001
+From: pi-web contributor <contributor@example.com>
+Date: Sat, 3 Oct 2026 15:35:05 +0800
+Subject: [PATCH 4/4] =?UTF-8?q?feat(pi-web):=20=E6=A8=A1=E5=9E=8B=E8=83=BD?=
+ =?UTF-8?q?=E5=8A=9B=E5=9B=BE=E6=A0=87=E4=B8=8E=E8=B4=B9=E7=94=A8=E5=80=8D?=
+ =?UTF-8?q?=E7=8E=87=E5=BE=BD=E6=A0=87=EF=BC=88=E6=95=B0=E6=8D=AE=E6=BA=90?=
+ =?UTF-8?q?=20models.json=20+=20model-caps.json=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ app/api/models/route.ts      |  44 ++++++++++++---
+ components/AgentsConfig.tsx  |   4 ++
+ components/ChatInput.tsx     |  14 +++--
+ components/ModelSelector.tsx | 101 +++++++++++++++++++++++++++++++++--
+ lib/models-cache.ts          |   2 +-
+ 5 files changed, 149 insertions(+), 16 deletions(-)
+
+diff --git a/app/api/models/route.ts b/app/api/models/route.ts
+index 677bc25..03ebf25 100644
+--- a/app/api/models/route.ts
++++ b/app/api/models/route.ts
+@@ -1,4 +1,4 @@
+-import { stat } from "fs/promises";
++import { readFile, stat } from "fs/promises";
+ import { resolve } from "path";
+ import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
+ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+@@ -16,6 +16,27 @@ export const dynamic = "force-dynamic";
+ 
+ const modelNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+ 
++/**
++ * Display-only per-model metadata (fee multiplier etc.), synced from the upstream gateway panel
++ * `/api/fees` by the sync script into `~/.pi/agent/model-caps.json`.
++ *
++ * Why a sidecar instead of models.json: the fee multiplier is a relative factor of the
++ * upstream base price, not a USD price, so it must not go into models.json's `cost`
++ * (that field feeds usage/billing display). Absent file → no badges, everything else works.
++ */
++type ModelCapsEntry = { rate?: number | null; free?: boolean };
++type ModelCapsDoc = { models?: Record<string, ModelCapsEntry> };
++
++async function loadModelCaps(): Promise<Record<string, ModelCapsEntry>> {
++  try {
++    const raw = await readFile(resolve(getAgentDir(), "model-caps.json"), "utf8");
++    const doc = JSON.parse(raw) as ModelCapsDoc;
++    return doc.models ?? {};
++  } catch {
++    return {};
++  }
++}
++
+ function compareModelEntries(
+   a: { id: string; name: string; provider: string },
+   b: { id: string; name: string; provider: string }
+@@ -27,7 +48,7 @@ function compareModelEntries(
+ 
+ async function loadModels(cwd: string): Promise<ModelsData> {
+   const nameMap = new Map<string, string>();
+-  let modelList: { id: string; name: string; provider: string }[] = [];
++  let modelList: { id: string; name: string; provider: string; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[] = [];
+   let defaultModel: { provider: string; modelId: string } | null = null;
+   const thinkingLevels: Record<string, string[]> = {};
+   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
+@@ -51,12 +72,19 @@ async function loadModels(cwd: string): Promise<ModelsData> {
+     settings.getEnabledModels(),
+   );
+   const { visible, thinkingLevelPins, warnings } = scope;
+-  modelList = visible.map((m) => ({
+-    id: m.id,
+-    name: m.name,
+-    provider: m.provider,
+-    input: m.input,
+-  })).sort(compareModelEntries);
++  const caps = await loadModelCaps();
++  modelList = visible.map((m) => {
++    const cap = caps[`${m.provider}/${m.id}`];
++    return {
++      id: m.id,
++      name: m.name,
++      provider: m.provider,
++      input: m.input,
++      reasoning: m.reasoning,
++      rate: cap?.rate ?? null,
++      rateFree: cap?.free ?? false,
++    };
++  }).sort(compareModelEntries);
+   for (const m of visible) {
+     const key = `${m.provider}:${m.id}`;
+     nameMap.set(key, m.name);
+diff --git a/components/AgentsConfig.tsx b/components/AgentsConfig.tsx
+index 67ad03c..d47876b 100644
+--- a/components/AgentsConfig.tsx
++++ b/components/AgentsConfig.tsx
+@@ -190,6 +190,10 @@ export function AgentsConfig({
+     provider: model.provider,
+     modelId: model.id,
+     name: model.name,
++    supportsImages: Boolean(model.input?.includes("image")),
++    supportsReasoning: Boolean(model.reasoning),
++    rate: model.rate,
++    rateFree: model.rateFree,
+   })), [modelOptions]);
+ 
+   const loadProfiles = useCallback(async (preferredKey?: string) => {
+diff --git a/components/ChatInput.tsx b/components/ChatInput.tsx
+index 884e640..0ce4269 100644
+--- a/components/ChatInput.tsx
++++ b/components/ChatInput.tsx
+@@ -54,7 +54,7 @@ interface Props {
+   model?: { provider: string; modelId: string } | null;
+   isAutoModelSelection?: boolean;
+   modelNames?: Record<string, string>;
+-  modelList?: { id: string; name: string; provider: string; input?: string[] }[];
++  modelList?: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[];
+   modelError?: string | null;
+   /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
+   modelScopeWarnings?: string[];
+@@ -563,7 +563,7 @@ export function ModelErrorBanner({ error }: { error?: string | null }) {
+ /** True when the selected model is known to accept image input (#584). Unknown modality info never blocks the user. */
+ export function modelSupportsImageInput(
+   model: { provider: string; modelId: string } | null | undefined,
+-  modelList: { id: string; name: string; provider: string; input?: string[] }[] | undefined
++  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[] | undefined
+ ): boolean {
+   if (!model) return true;
+   const entry = modelList?.find((m) => m.provider === model.provider && m.id === model.modelId);
+@@ -1591,7 +1591,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+   // Build model options: prefer modelList (has provider info), fallback to modelNames
+   const modelOptions: ModelSelectorOption[] = (() => {
+     if (modelList && modelList.length > 0) {
+-      return modelList.map((m) => ({ provider: m.provider, modelId: m.id, name: m.name }));
++      return modelList.map((m) => ({
++        provider: m.provider,
++        modelId: m.id,
++        name: m.name,
++        supportsImages: Boolean(m.input?.includes("image")),
++        supportsReasoning: Boolean(m.reasoning),
++        rate: m.rate,
++        rateFree: m.rateFree,
++      }));
+     }
+     return Object.entries(modelNames ?? {}).map(([modelId, name]) => ({
+       provider: model?.provider ?? "unknown",
+diff --git a/components/ModelSelector.tsx b/components/ModelSelector.tsx
+index 5049e5f..1e739e6 100644
+--- a/components/ModelSelector.tsx
++++ b/components/ModelSelector.tsx
+@@ -9,6 +9,74 @@ export interface ModelSelectorOption {
+   provider: string;
+   modelId: string;
+   name: string;
++  /** 能力图标（数据源：pi 模型声明——models.json 的 input/reasoning，经 /api/models 下发） */
++  supportsImages?: boolean;
++  supportsReasoning?: boolean;
++  /** 费用倍率（数据源：上游网关 /api/fees 同步到 model-caps.json）；null=上游未返回定价 */
++  rate?: number | null;
++  rateFree?: boolean;
++}
++
++const CAP_IMAGES_TITLE = "支持图像输入（多模态视觉）：可直接给该模型发送图片";
++const CAP_REASONING_TITLE = "支持思考/推理模式：回答前会先推理（可能产生 reasoning 内容）";
++
++/** 能力图标：eye 支持图像输入 / brain 支持推理。内联 SVG，随主题自适应（lucide ISC）。 */
++function ModelCapIcons({ images, reasoning }: { images?: boolean; reasoning?: boolean }) {
++  if (!images && !reasoning) return null;
++  const svgProps = {
++    width: 11,
++    height: 11,
++    viewBox: "0 0 24 24",
++    fill: "none",
++    stroke: "currentColor",
++    strokeWidth: 2,
++    strokeLinecap: "round" as const,
++    strokeLinejoin: "round" as const,
++    "aria-hidden": true,
++  };
++  return (
++    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0, opacity: 0.72 }}>
++      {images ? (
++        <span title={CAP_IMAGES_TITLE} aria-label={CAP_IMAGES_TITLE} style={{ display: "inline-flex" }}>
++          <svg {...svgProps} role="img" aria-label={CAP_IMAGES_TITLE}>
++            <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />
++            <circle cx="12" cy="12" r="3" />
++          </svg>
++        </span>
++      ) : null}
++      {reasoning ? (
++        <span title={CAP_REASONING_TITLE} aria-label={CAP_REASONING_TITLE} style={{ display: "inline-flex" }}>
++          <svg {...svgProps} role="img" aria-label={CAP_REASONING_TITLE}>
++            <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
++            <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
++            <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
++            <path d="M17.599 6.5a3 3 0 0 0 .399-1.375" />
++            <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" />
++            <path d="M3.477 10.896a4 4 0 0 1 .585-.396" />
++            <path d="M19.938 10.5a4 4 0 0 1 .585.396" />
++            <path d="M6 18a4 4 0 0 1-1.967-.516" />
++            <path d="M19.967 17.484A4 4 0 0 1 18 18" />
++          </svg>
++        </span>
++      ) : null}
++    </span>
++  );
++}
++
++/** 费用倍率标签：数字=上游倍率、免费=0 倍率档、—=上游未返回定价。 */
++function ModelRateBadge({ rate, free }: { rate?: number | null; free?: boolean }) {
++  if (rate === undefined) return null;
++  const text = rate === null ? "—" : rate === 0 && free ? "免费" : `x${rate}`;
++  const title = rate === null
++    ? "上游未返回定价（倍率未知）"
++    : rate === 0 && free
++      ? "免费模型（倍率 0）"
++      : `费用倍率 x${rate}（相对上游基价，非美元单价）`;
++  return (
++    <span title={title} aria-label={title} style={{ marginLeft: "auto", paddingLeft: 10, flexShrink: 0, color: "var(--text-dim)", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>
++      {text}
++    </span>
++  );
+ }
+ 
+ interface ModelSelectorProps {
+@@ -85,8 +153,11 @@ export function ModelSelector({
+     else modelsByProvider.push({ provider: option.provider, options: [option] });
+   }
+ 
++  const currentOption = value
++    ? sortedOptions.find((option) => option.modelId === value.modelId && option.provider === value.provider)
++    : undefined;
+   const currentName = selectedLabel ?? (value
+-    ? sortedOptions.find((option) => option.modelId === value.modelId && option.provider === value.provider)?.name ?? value.modelId
++    ? currentOption?.name ?? value.modelId
+     : emptyLabel ?? (sortedOptions.length > 0 ? "Select model" : "No models"));
+ 
+   useEffect(() => {
+@@ -220,6 +291,9 @@ export function ModelSelector({
+           </svg>
+         )}
+         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentName}</span>
++        {currentOption && (
++          <ModelCapIcons images={currentOption.supportsImages} reasoning={currentOption.supportsReasoning} />
++        )}
+         {variant === "field" && (
+           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, color: "var(--text-dim)" }}>
+             <polyline points="6 9 12 15 18 9" />
+@@ -324,7 +398,13 @@ export function ModelSelector({
+                           onSave: () => saveDefault(option),
+                         } : undefined}
+                       >
+-                        <OptionLabel label={option.name} />
++                        <OptionLabel
++                          label={option.name}
++                          supportsImages={option.supportsImages}
++                          supportsReasoning={option.supportsReasoning}
++                          rate={option.rate}
++                          rateFree={option.rateFree}
++                        />
+                       </SelectorRow>
+                     );
+                   })}
+@@ -338,6 +418,19 @@ export function ModelSelector({
+   );
+ }
+ 
+-function OptionLabel({ label }: { label: string }) {
+-  return <span title={label} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>;
++function OptionLabel({ label, supportsImages, supportsReasoning, rate, rateFree }: {
++  label: string;
++  supportsImages?: boolean;
++  supportsReasoning?: boolean;
++  rate?: number | null;
++  rateFree?: boolean;
++}) {
++  // 外层撑满整行，图标与徽标贴右；文字过长时先省略文字、不挤压徽标。
++  return (
++    <>
++      <span title={label} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
++      <ModelCapIcons images={supportsImages} reasoning={supportsReasoning} />
++      <ModelRateBadge rate={rate} free={rateFree} />
++    </>
++  );
+ }
+diff --git a/lib/models-cache.ts b/lib/models-cache.ts
+index 89ad99f..9cf33fc 100644
+--- a/lib/models-cache.ts
++++ b/lib/models-cache.ts
+@@ -1,6 +1,6 @@
+ export interface ModelsData {
+   models: Record<string, string>;
+-  modelList: { id: string; name: string; provider: string; input?: string[] }[];
++  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[];
+   defaultModel: { provider: string; modelId: string } | null;
+   /** Resolved thinking level a new session starts with when the user has not picked one. */
+   defaultThinkingLevel: string | null;
+-- 
+2.47.3
+
