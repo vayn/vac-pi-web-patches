@@ -120,33 +120,13 @@ of the upstream billing factor**, not a currency price; writing it into `cost` w
 corrupt that field's semantics. When the sidecar is missing, 0004 **degrades silently** —
 no badges are shown and nothing else breaks.
 
-## 7. Desensitization statement
-
-These patches were prepared for public release from a private working tree. Exactly
-three classes of text were neutralized, and **nothing else was touched**:
-
-| Class | Example (before → after) |
-|---|---|
-| Author identity | the private author name and address → `pi-web contributor <contributor@example.com>` |
-| Internal references | comments naming a private repository path, a private ledger file and its section numbers → neutral descriptions |
-| Third-party product names | private gateway and channel names in comments → "the upstream gateway" / "a mobile table component" |
-
-The series contains **no keys, tokens, passwords or private addresses**. The effect
-screenshots follow the same standard: their sample data is neutral (`model-a`, `gateway`,
-`provider-x`), with no private channel or product names left visible. Verified after
-sanitization:
-
-- All 5 patches apply cleanly in order to a bare `v0.10.0` tree;
-- The resulting tree differs from the pre-sanitization result in **exactly 5
-  comment lines**, all of them the neutralized text above, and **zero code lines**.
-
-## 8. Changelog
+## 7. Changelog
 
 | Version | Change |
 |---|---|
-| 1.0.0 | First public release: 5 patches (0001–0005) against pi-web v0.10.0, desensitized |
+| 1.0.0 | First public release: 5 patches (0001–0005) against pi-web v0.10.0 |
 
-## 9. License
+## 8. License
 
 The upstream code these patches modify is MIT (see the upstream `LICENSE`). This patch
 series is likewise offered under **MIT**.
