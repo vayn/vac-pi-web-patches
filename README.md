@@ -142,6 +142,7 @@ you extend this.
 
 | Version | Change |
 |---|---|
+| 1.2.0 | No functional change: comment wording only (the applied tree is identical to 1.1.0 apart from comments) |
 | 1.1.0 | 0004 extended: `disabled` flag from the `model-caps.json` sidecar renders a strikethrough **and** a no-entry icon, and such models cannot be selected |
 | 1.0.0 | First public release: 5 patches (0001–0005) against pi-web v0.10.0 |
 

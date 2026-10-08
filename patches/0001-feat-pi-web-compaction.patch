@@ -19,7 +19,7 @@ index 0570a5e..2c013b8 100644
  function CompactionMessageView({ message }: { message: CustomMessage }) {
    const { t } = useI18n();
    const summary = getMessageText(message.content);
-+  // mobile patch：默认折叠，只留标题栏（业主裁定 2026-09-28）。
++  // mobile patch：默认折叠，只留标题栏（维护者裁定 2026-09-28）。
 +  // compaction 摘要在会话中可能很长，手机上会挤占大量滚动空间；
 +  // 默认收起、点击标题栏展开，与 pi 的其它折叠块交互一致。
 +  const [expanded, setExpanded] = useState(false);

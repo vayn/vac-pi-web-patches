@@ -8,7 +8,7 @@ MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-业主指令 2026-10-04：给 pi-web 增加表格放大按钮和实现放大功能，
+维护者要求 2026-10-04：给 pi-web 增加表格放大按钮和实现放大功能，
 视觉与交互参考某移动端表格组件（截图逆向）：放大图标为四段双向
 对角箭头，全屏态为整页铺满、表头保留。
 
@@ -21,7 +21,7 @@ Content-Transfer-Encoding: 8bit
   依据该移动端组件的结论「触屏无 hover，图标须常驻可见」。
 - 三语 i18n 键 chat.zoomTable（en/zh-CN/zh-TW）。
 
-全屏态单元格折行（业主 2026-10-05 反馈「单元格应当尽可能自动折行，
+全屏态单元格折行（维护者 2026-10-05 反馈「单元格应当尽可能自动折行，
 而不是全部都是一行到底」）：
 - 上游 .markdown-table-wrap > table 为 width:max-content，即表格按内容
   自然宽度铺开、由外层横向滚动——非全屏场景合理，全屏场景正是问题源：
@@ -54,7 +54,7 @@ index 3399e0a..929f434 100644
    font-weight: 650;
  }
 +
-+/* ---- 表格放大（业主 2026-10-04；组件 components/TableZoom.tsx）----
++/* ---- 表格放大（维护者 2026-10-04；组件 components/TableZoom.tsx）----
 +   触发按钮浮于表格右上角：桌面 hover 才完全显现，触屏（无 hover）保持低透明度常驻可点——
 +   参照该移动端组件的结论「触屏无 hover，图标须常驻可见」。 */
 +.table-zoom {
@@ -199,7 +199,7 @@ index 0000000..ab5d985
 +import { useI18n } from "@/hooks/useI18n";
 +
 +/**
-+ * 表格放大（业主 2026-10-04 指令）：为 markdown 表格提供「放大」按钮与全屏查看。
++ * 表格放大（维护者 2026-10-04 要求）：为 markdown 表格提供「放大」按钮与全屏查看。
 + *
 + * 设计对齐本仓 ImagePreview（components/ImagePreview.tsx）：
 + *   - 触发按钮 → <dialog> → ::backdrop + 关闭按钮；
