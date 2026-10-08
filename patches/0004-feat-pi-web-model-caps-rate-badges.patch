@@ -10,15 +10,15 @@ Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
 ---
- app/api/models/route.ts      |  44 ++++++++++++---
- components/AgentsConfig.tsx  |   4 ++
- components/ChatInput.tsx     |  14 +++--
- components/ModelSelector.tsx | 101 +++++++++++++++++++++++++++++++++--
- lib/models-cache.ts          |   2 +-
- 5 files changed, 149 insertions(+), 16 deletions(-)
+ app/api/models/route.ts      | 242 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------------
+ components/AgentsConfig.tsx  | 192 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------
+ components/ChatInput.tsx     | 186 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------
+ components/ModelSelector.tsx | 168 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------
+ lib/models-cache.ts          |   3 +--
+ 5 files changed, 744 insertions(+), 47 deletions(-)
 
 diff --git a/app/api/models/route.ts b/app/api/models/route.ts
-index 677bc25..03ebf25 100644
+index 677bc25..8461261 100644
 --- a/app/api/models/route.ts
 +++ b/app/api/models/route.ts
 @@ -1,4 +1,4 @@
@@ -27,7 +27,7 @@ index 677bc25..03ebf25 100644
  import { resolve } from "path";
  import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
  import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-@@ -16,6 +16,27 @@ export const dynamic = "force-dynamic";
+@@ -16,6 +16,30 @@ export const dynamic = "force-dynamic";
  
  const modelNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
  
@@ -38,8 +38,11 @@ index 677bc25..03ebf25 100644
 + * Why a sidecar instead of models.json: the fee multiplier is a relative factor of the
 + * upstream base price, not a USD price, so it must not go into models.json's `cost`
 + * (that field feeds usage/billing display). Absent file → no badges, everything else works.
++ *
++ * The same sidecar also carries a `disabled` flag: models an operator has taken out of
++ * rotation but not out of the pool. 0004 renders those struck through, with a no-entry icon.
 + */
-+type ModelCapsEntry = { rate?: number | null; free?: boolean };
++type ModelCapsEntry = { rate?: number | null; free?: boolean; disabled?: boolean };
 +type ModelCapsDoc = { models?: Record<string, ModelCapsEntry> };
 +
 +async function loadModelCaps(): Promise<Record<string, ModelCapsEntry>> {
@@ -60,11 +63,11 @@ index 677bc25..03ebf25 100644
  async function loadModels(cwd: string): Promise<ModelsData> {
    const nameMap = new Map<string, string>();
 -  let modelList: { id: string; name: string; provider: string }[] = [];
-+  let modelList: { id: string; name: string; provider: string; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[] = [];
++  let modelList: { id: string; name: string; provider: string; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[] = [];
    let defaultModel: { provider: string; modelId: string } | null = null;
    const thinkingLevels: Record<string, string[]> = {};
    const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
-@@ -51,12 +72,19 @@ async function loadModels(cwd: string): Promise<ModelsData> {
+@@ -51,12 +72,22 @@ async function loadModels(cwd: string): Promise<ModelsData> {
      settings.getEnabledModels(),
    );
    const { visible, thinkingLevelPins, warnings } = scope;
@@ -85,16 +88,19 @@ index 677bc25..03ebf25 100644
 +      reasoning: m.reasoning,
 +      rate: cap?.rate ?? null,
 +      rateFree: cap?.free ?? false,
++      // 人工禁用（灰色不可选）——ModelSelector 据此渲删除线并禁止点选。
++      // 该标记由你的同步脚本从禁选名单并入 model-caps.json 的 disabled 字段
++      disabled: cap?.disabled ?? false,
 +    };
 +  }).sort(compareModelEntries);
    for (const m of visible) {
      const key = `${m.provider}:${m.id}`;
      nameMap.set(key, m.name);
 diff --git a/components/AgentsConfig.tsx b/components/AgentsConfig.tsx
-index 67ad03c..d47876b 100644
+index 67ad03c..4500297 100644
 --- a/components/AgentsConfig.tsx
 +++ b/components/AgentsConfig.tsx
-@@ -190,6 +190,10 @@ export function AgentsConfig({
+@@ -190,6 +190,12 @@ export function AgentsConfig({
      provider: model.provider,
      modelId: model.id,
      name: model.name,
@@ -102,11 +108,13 @@ index 67ad03c..d47876b 100644
 +    supportsReasoning: Boolean(model.reasoning),
 +    rate: model.rate,
 +    rateFree: model.rateFree,
++    // 同 ChatInput：modelOptions → ModelSelectorOption 的必经关口，禁用标记必须透传。
++    disabled: Boolean(model.disabled),
    })), [modelOptions]);
  
    const loadProfiles = useCallback(async (preferredKey?: string) => {
 diff --git a/components/ChatInput.tsx b/components/ChatInput.tsx
-index 884e640..0ce4269 100644
+index 884e640..0aac9b9 100644
 --- a/components/ChatInput.tsx
 +++ b/components/ChatInput.tsx
 @@ -54,7 +54,7 @@ interface Props {
@@ -114,7 +122,7 @@ index 884e640..0ce4269 100644
    isAutoModelSelection?: boolean;
    modelNames?: Record<string, string>;
 -  modelList?: { id: string; name: string; provider: string; input?: string[] }[];
-+  modelList?: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[];
++  modelList?: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[];
    modelError?: string | null;
    /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
    modelScopeWarnings?: string[];
@@ -123,11 +131,11 @@ index 884e640..0ce4269 100644
  export function modelSupportsImageInput(
    model: { provider: string; modelId: string } | null | undefined,
 -  modelList: { id: string; name: string; provider: string; input?: string[] }[] | undefined
-+  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[] | undefined
++  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[] | undefined
  ): boolean {
    if (!model) return true;
    const entry = modelList?.find((m) => m.provider === model.provider && m.id === model.modelId);
-@@ -1591,7 +1591,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+@@ -1591,7 +1591,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
    // Build model options: prefer modelList (has provider info), fallback to modelNames
    const modelOptions: ModelSelectorOption[] = (() => {
      if (modelList && modelList.length > 0) {
@@ -140,15 +148,19 @@ index 884e640..0ce4269 100644
 +        supportsReasoning: Boolean(m.reasoning),
 +        rate: m.rate,
 +        rateFree: m.rateFree,
++        // 禁用标记必须在此透传：/api/models 已下发，但本映射是
++        // modelList → ModelSelectorOption 的**必经关口**，漏传则删除线与
++        // 禁止图标均不出现（已踩过一次：两端都正常、只有中间断链）。
++        disabled: Boolean(m.disabled),
 +      }));
      }
      return Object.entries(modelNames ?? {}).map(([modelId, name]) => ({
        provider: model?.provider ?? "unknown",
 diff --git a/components/ModelSelector.tsx b/components/ModelSelector.tsx
-index 5049e5f..1e739e6 100644
+index 5049e5f..b051a74 100644
 --- a/components/ModelSelector.tsx
 +++ b/components/ModelSelector.tsx
-@@ -9,6 +9,74 @@ export interface ModelSelectorOption {
+@@ -9,6 +9,117 @@ export interface ModelSelectorOption {
    provider: string;
    modelId: string;
    name: string;
@@ -158,10 +170,14 @@ index 5049e5f..1e739e6 100644
 +  /** 费用倍率（数据源：上游网关 /api/fees 同步到 model-caps.json）；null=上游未返回定价 */
 +  rate?: number | null;
 +  rateFree?: boolean;
++  /** 人工禁用（额度耗尽/渠道故障）——渲染删除线且不可点选。
++   *  数据源：禁选名单 → 同步脚本 → model-caps.json 的 disabled → /api/models。 */
++  disabled?: boolean;
 +}
 +
 +const CAP_IMAGES_TITLE = "支持图像输入（多模态视觉）：可直接给该模型发送图片";
 +const CAP_REASONING_TITLE = "支持思考/推理模式：回答前会先推理（可能产生 reasoning 内容）";
++const DISABLED_TITLE = "该模型已人工禁用（额度耗尽或渠道故障）——在禁选名单中，恢复后由巡检确认并移除";
 +
 +/** 能力图标：eye 支持图像输入 / brain 支持推理。内联 SVG，随主题自适应（lucide ISC）。 */
 +function ModelCapIcons({ images, reasoning }: { images?: boolean; reasoning?: boolean }) {
@@ -206,6 +222,45 @@ index 5049e5f..1e739e6 100644
 +  );
 +}
 +
++/**
++ * 人工禁用图标：与推理/多模态图标同风格的禁止符号。
++ *
++ * 为何删除线之外还要图标：删除线是**文字级**信号，在长列表里扫视时对比度低，
++ * 且依赖字体渲染（部分主题/字体下 line-through 不明显或被 ellipsis 截断）。
++ * 图标是**独立色块 + 语义形状**，不依赖字体，扫视即可辨识——两者并用构成
++ * 双通道，任一失效（样式被覆盖 / 字段未透传）另一路仍可辨识。
++ */
++function ModelDisabledIcon({ reason }: { reason?: string }) {
++  const title = reason || "已人工禁用（额度耗尽或渠道故障）——见禁选名单";
++  const svgProps = {
++    width: 11,
++    height: 11,
++    viewBox: "0 0 24 24",
++    fill: "none",
++    stroke: "currentColor",
++    strokeWidth: 2,
++    strokeLinecap: "round" as const,
++    strokeLinejoin: "round" as const,
++    "aria-hidden": true,
++  };
++  return (
++    <span
++      title={title}
++      aria-label={title}
++      style={{
++        display: "inline-flex",
++        flexShrink: 0,
++        color: "var(--danger, #ef4444)",
++      }}
++    >
++      <svg {...svgProps} role="img" aria-label={title}>
++        <circle cx="12" cy="12" r="9" />
++        <path d="m5.6 5.6 12.8 12.8" />
++      </svg>
++    </span>
++  );
++}
++
 +/** 费用倍率标签：数字=上游倍率、免费=0 倍率档、—=上游未返回定价。 */
 +function ModelRateBadge({ rate, free }: { rate?: number | null; free?: boolean }) {
 +  if (rate === undefined) return null;
@@ -223,7 +278,7 @@ index 5049e5f..1e739e6 100644
  }
  
  interface ModelSelectorProps {
-@@ -85,8 +153,11 @@ export function ModelSelector({
+@@ -85,8 +196,11 @@ export function ModelSelector({
      else modelsByProvider.push({ provider: option.provider, options: [option] });
    }
  
@@ -236,7 +291,16 @@ index 5049e5f..1e739e6 100644
      : emptyLabel ?? (sortedOptions.length > 0 ? "Select model" : "No models"));
  
    useEffect(() => {
-@@ -220,6 +291,9 @@ export function ModelSelector({
+@@ -148,6 +262,8 @@ export function ModelSelector({
+       };
+ 
+   const choose = (option: ModelSelectorOption) => {
++    // 禁用模型不可选（双保险：UI 已置 pointer-events 与 aria-disabled）
++    if (option.disabled) return;
+     const active = option.modelId === value?.modelId && option.provider === value?.provider;
+     setOpen(false);
+     setFilter("");
+@@ -220,6 +336,9 @@ export function ModelSelector({
            </svg>
          )}
          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentName}</span>
@@ -246,7 +310,24 @@ index 5049e5f..1e739e6 100644
          {variant === "field" && (
            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, color: "var(--text-dim)" }}>
              <polyline points="6 9 12 15 18 9" />
-@@ -324,7 +398,13 @@ export function ModelSelector({
+@@ -312,9 +431,15 @@ export function ModelSelector({
+                     </div>
+                   )}
+                   {group.options.map((option) => {
++                    const disabled = Boolean(option.disabled);
+                     return (
+-                      <SelectorRow
++                      <div
+                         key={`${option.provider}:${option.modelId}`}
++                        aria-disabled={disabled || undefined}
++                        title={disabled ? DISABLED_TITLE : undefined}
++                        style={disabled ? { opacity: 0.55, cursor: "not-allowed", pointerEvents: "none" } : undefined}
++                      >
++                      <SelectorRow
+                         active={option.modelId === value?.modelId && option.provider === value?.provider}
+                         onSelect={() => choose(option)}
+                         star={onSetDefault ? {
+@@ -324,8 +449,16 @@ export function ModelSelector({
                            onSave: () => saveDefault(option),
                          } : undefined}
                        >
@@ -257,44 +338,59 @@ index 5049e5f..1e739e6 100644
 +                          supportsReasoning={option.supportsReasoning}
 +                          rate={option.rate}
 +                          rateFree={option.rateFree}
++                          disabled={disabled}
 +                        />
                        </SelectorRow>
++                      </div>
                      );
                    })}
-@@ -338,6 +418,19 @@ export function ModelSelector({
+                 </div>
+@@ -338,6 +471,28 @@ export function ModelSelector({
    );
  }
  
 -function OptionLabel({ label }: { label: string }) {
 -  return <span title={label} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>;
-+function OptionLabel({ label, supportsImages, supportsReasoning, rate, rateFree }: {
++function OptionLabel({ label, supportsImages, supportsReasoning, rate, rateFree, disabled }: {
 +  label: string;
 +  supportsImages?: boolean;
 +  supportsReasoning?: boolean;
 +  rate?: number | null;
 +  rateFree?: boolean;
++  disabled?: boolean;
 +}) {
 +  // 外层撑满整行，图标与徽标贴右；文字过长时先省略文字、不挤压徽标。
++  // 灰名单项：文字加删除线（不遮图标/徽标，保留能力信息供参考）。
 +  return (
 +    <>
-+      <span title={label} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
++      <span
++        title={label}
++        style={{
++          flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
++          ...(disabled ? { textDecoration: "line-through" } : {}),
++        }}
++      >{label}</span>
++      {disabled ? <ModelDisabledIcon /> : null}
 +      <ModelCapIcons images={supportsImages} reasoning={supportsReasoning} />
 +      <ModelRateBadge rate={rate} free={rateFree} />
 +    </>
 +  );
  }
 diff --git a/lib/models-cache.ts b/lib/models-cache.ts
-index 89ad99f..9cf33fc 100644
+index 89ad99f..0c4b1e1 100644
 --- a/lib/models-cache.ts
 +++ b/lib/models-cache.ts
 @@ -1,6 +1,6 @@
  export interface ModelsData {
    models: Record<string, string>;
 -  modelList: { id: string; name: string; provider: string; input?: string[] }[];
-+  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean }[];
++  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[];
    defaultModel: { provider: string; modelId: string } | null;
    /** Resolved thinking level a new session starts with when the user has not picked one. */
    defaultThinkingLevel: string | null;
+
 -- 
 2.47.3
 
+-- 
+2.47.3

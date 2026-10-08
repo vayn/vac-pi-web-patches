@@ -14,7 +14,7 @@
 | 0001 | `feat-pi-web-compaction` | feat | Collapse compaction messages by default. The title bar becomes a clickable button (`aria-expanded`) showing only a chevron, the summary's first line and the timestamp; expanding reveals the full summary plus the read/modified file list |
 | 0002 | `chore-pi-web-pnpm` | chore | Ignore pnpm-generated lockfile (the project keeps the upstream npm layout) |
 | 0003 | `fix-pi-web-height-maxHeight` | fix | Long questions no longer squeeze the options area: the dialog gets an explicit height so it resolves to a definite size |
-| 0004 | `feat-pi-web-model-caps-rate-badges` | feat | Model capability icons and rate badges: `/api/models` reads a `model-caps.json` sidecar and renders reasoning/image capability icons plus a rate badge in the model selector |
+| 0004 | `feat-pi-web-model-caps-rate-badges` | feat | Model capability icons, rate badges and a **disabled-model marker**: `/api/models` reads a `model-caps.json` sidecar and renders reasoning/image capability icons, a rate badge, and — for models an operator has taken out of rotation — a strikethrough plus a no-entry icon (unselectable) |
 | 0005 | `feat-pi-web-table-zoom` | feat | Markdown table **zoom button and fullscreen view**. The button floats at the table's top-right (always visible on touch); in fullscreen, `<dialog>` cells **wrap automatically**, falling back to horizontal scrolling only when a table has too many columns to fit |
 
 > **Not every patch is screenshot-able.** 0002 only changes `.gitignore`, so it has no
@@ -52,6 +52,12 @@ question compresses the options — options B and C are cut off). Right: after
 Capability icons show on/off state (bright = supported, dimmed = not), and the rate badge
 distinguishes free from paid multipliers. Rendered in both themes because the badges use
 theme variables.
+
+A **disabled** model (one taken out of rotation by an operator but still in the pool) is drawn
+with a strikethrough **and** a no-entry icon, and cannot be selected. Both signals are kept
+deliberately: a strikethrough is a *typographic* signal, so it reads poorly in a long list and can
+be lost to an ellipsis or an unusual font, while the icon is an independent shape that survives
+all of that. If one channel fails, the other still identifies the row.
 
 ![model caps badges](docs/screenshots/en/0004-model-caps-badges.png)
 
@@ -120,10 +126,23 @@ of the upstream billing factor**, not a currency price; writing it into `cost` w
 corrupt that field's semantics. When the sidecar is missing, 0004 **degrades silently** —
 no badges are shown and nothing else breaks.
 
+- **Disabled flag**: the same sidecar may carry `disabled: true` per model. This is produced
+  outside this patch series (by whatever job maintains your model list — the patches only
+  *read* it), and it is what drives the strikethrough and the no-entry icon. Absent or
+  false ⇒ the model renders normally, so the feature is inert until you populate it. A
+  model missing from the sidecar entirely is simply not marked.
+
+Note that the flag must be threaded through **every** hop between `/api/models` and the
+selector row — the route maps caps onto the model list, and each consumer maps that list onto
+`ModelSelectorOption`. A single hop that drops the field makes the feature silently invisible
+while both ends still look correct; that is exactly the failure mode to guard against when
+you extend this.
+
 ## 7. Changelog
 
 | Version | Change |
 |---|---|
+| 1.1.0 | 0004 extended: `disabled` flag from the `model-caps.json` sidecar renders a strikethrough **and** a no-entry icon, and such models cannot be selected |
 | 1.0.0 | First public release: 5 patches (0001–0005) against pi-web v0.10.0 |
 
 ## 8. License
