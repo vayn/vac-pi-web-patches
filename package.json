@@ -1,6 +1,6 @@
 {
   "name": "pi-web-patches",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Enhancement patch series for pi-web v0.10.0: compaction message collapse, pnpm lockfile ignore, dialog height fix, model capability icons + rate badges + disabled-model markers, and markdown table zoom with fullscreen view.",
   "keywords": [
     "pi-package",

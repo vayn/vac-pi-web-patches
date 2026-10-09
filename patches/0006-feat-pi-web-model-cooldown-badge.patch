@@ -1,0 +1,364 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pi-web contributor <contributor@example.com>
+Date: Fri, 09 Oct 2026 09:46:42 +0800
+Subject: [PATCH 6/7] feat(pi-web): 冷却期模型渲禁止标志（不加删除线）
+
+维护者指令 2026-10-08：冷却期内的 model 应当显示一个禁止标志，但是不用删除线。
+
+背景（实测依据）：model-router 的 error-state.json 会在模型撞 6004/429 时
+登记 { until, reason }，候选链据此在冷却期内剔除该模型；但 UI 无任何体现——
+维护者看到的是一个「列表里能选、点了却被 router 换掉」的模型。当日实证
+provider/model 于 21:12:36 撞 usage_window，until=
+2026-10-09 12:37:55（上游声明的配额重置时刻），UI 全程无信号。
+
+语义分层（勿与禁用名单合并，维护者裁定）：
+  disabled = 人工 + 临时（额度耗尽/渠道故障，须手动删 disabled-models.json 行）
+             ⇒ 删除线 + 红色 ⊘，隐含语义「需要人处理」
+  cooldown = 自动 + 自愈（router 运行态熔断，到期自动失效）
+             ⇒ 琥珀色 ⊘、**无删除线**，隐含语义「等一会儿就好」
+若一并加删除线，维护者会误以为要手工清理；而实际上到点自动恢复。
+
+实现（复用 0004 已建的 /api/models → ModelSelector 数据链，只加一跳）：
+- app/api/models/route.ts：新增 loadCooldowns()，**实时**读
+  ~/.local/state/model-router/error-state.json（MODEL_ROUTER_STATE_DIR 优先，
+  与 router 的 STATE_DIR 同规则）。为何不走 model-caps.json 静态快照：那是
+  disabled 的通道，靠手动跑 the sync script 更新；冷却可能几分钟前刚发生、
+  也可能刚刚结束，两个方向都会失真。本路由 force-dynamic，实时读成本仅一次
+  几 KB readFile。until <= now 的条目在服务端即丢弃（router 侧过期即不再挡
+  候选链，UI 还禁着点比不显示更糟）。键口径：error-state 键与 m.id 同为
+  <channel>/<model>（provider 恒 provider），可直接下标命中。
+- ModelSelector.tsx：新增 useNow(30s) + cooldownTitle() + ModelCooldownIcon()
+  （同形状异色，与 ModelDisabledIcon 视觉同族）；OptionLabel 的删除线**只**绑定
+  disabled；到期自愈靠前端按 until 判定 + 30s tick，否则「已恢复的模型仍
+  不可点」；冷却项透明度 0.72（禁用名单 0.55）以区分临时/定性。
+- 透传：models-cache.ts / ChatInput.tsx（3 处类型 + 映射）/ AgentsConfig.tsx。
+
+回滚：git revert 本补丁（或 --revert 后重放 0001..0005）。
+
+ app/api/models/route.ts      |  50 ++++++++++++++++++++-
+ components/AgentsConfig.tsx  |   2 +
+ components/ChatInput.tsx     |   6 ++-
+ components/ModelSelector.tsx | 103 +++++++++++++++++++++++++++++++++++++++++--
+ lib/models-cache.ts          |   2 +-
+ 5 files changed, 155 insertions(+), 8 deletions(-)
+
+diff --git a/app/api/models/route.ts b/app/api/models/route.ts
+index 0724539..715c5e5 100644
+--- a/app/api/models/route.ts
++++ b/app/api/models/route.ts
+@@ -1,4 +1,5 @@
+ import { readFile, stat } from "fs/promises";
++import { homedir } from "os";
+ import { resolve } from "path";
+ import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
+ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+@@ -40,6 +41,48 @@ async function loadModelCaps(): Promise<Record<string, ModelCapsEntry>> {
+   }
+ }
+ 
++/**
++ * 冷却态（router 运行态熔断）——`error-state.json` 里 `until > now` 的条目。
++ *
++ * 为何**不走** model-caps.json 静态快照（与人工禁用名单 `disabled` 分道）：
++ *  1. 语义分层——`disabled` 是人工 + 临时（恢复后手动删行），冷却是自动 +
++ *     自愈（到期即失效）。混在同一静态文件里会让「自动恢复」退化成「必须
++ *     有人记得重跑 the sync script」，正是 维护者裁定 划分两套机制的原因。
++ *  2. 时效——快照只在手动 sync 时更新；冷却可能几分钟前刚发生、也可能刚刚
++ *     结束，两个方向都会失真。本路由是 `force-dynamic`，实时读的成本只是一次
++ *     几 KB 的 readFile。
++ *
++ * 键口径：error-state 的键与 `m.id` **同口径**（`<channel>/<model>`，provider
++ * 恒为 provider），故可直接下标命中，无需像禁用名单那样做后缀匹配。
++ */
++type CooldownEntry = { until: number; reason?: string };
++
++function routerStateDir(): string {
++  // 与 model-router.ts 的 STATE_DIR 同一解析规则（MODEL_ROUTER_STATE_DIR 优先），
++  // 否则隔离/测试环境的覆盖会与 router 真源分叉。
++  return process.env.MODEL_ROUTER_STATE_DIR
++    || resolve(homedir(), ".local", "state", "model-router");
++}
++
++async function loadCooldowns(): Promise<Record<string, CooldownEntry>> {
++  try {
++    const raw = await readFile(resolve(routerStateDir(), "error-state.json"), "utf8");
++    const doc = JSON.parse(raw) as Record<string, { until?: number; reason?: string } | undefined>;
++    const now = Date.now();
++    const out: Record<string, CooldownEntry> = {};
++    for (const [modelId, v] of Object.entries(doc ?? {})) {
++      // 过期条目必须丢弃：router 侧过期即不再挡候选链，UI 若还挂着「禁止」
++      // 会造成「不可点但其实能用」的错位——比不显示更糟。
++      if (!v || typeof v.until !== "number" || v.until <= now) continue;
++      out[modelId] = { until: v.until, reason: typeof v.reason === "string" ? v.reason : undefined };
++    }
++    return out;
++  } catch {
++    // 文件不存在 = router 从未熔断过（正常态），不是错误。
++    return {};
++  }
++}
++
+ function compareModelEntries(
+   a: { id: string; name: string; provider: string },
+   b: { id: string; name: string; provider: string }
+@@ -51,7 +94,7 @@ function compareModelEntries(
+ 
+ async function loadModels(cwd: string): Promise<ModelsData> {
+   const nameMap = new Map<string, string>();
+-  let modelList: { id: string; name: string; provider: string; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[] = [];
++  let modelList: { id: string; name: string; provider: string; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean; cooldown?: { until: number; reason?: string } | null }[] = [];
+   let defaultModel: { provider: string; modelId: string } | null = null;
+   const thinkingLevels: Record<string, string[]> = {};
+   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
+@@ -76,8 +119,10 @@ async function loadModels(cwd: string): Promise<ModelsData> {
+   );
+   const { visible, thinkingLevelPins, warnings } = scope;
+   const caps = await loadModelCaps();
++  const cooldowns = await loadCooldowns();
+   modelList = visible.map((m) => {
+     const cap = caps[`${m.provider}/${m.id}`];
++    const cd = cooldowns[m.id];
+     return {
+       id: m.id,
+       name: m.name,
+@@ -89,6 +134,9 @@ async function loadModels(cwd: string): Promise<ModelsData> {
+       // 人工禁用（灰色不可选）——ModelSelector 据此渲删除线并禁止点选。
+       // 该标记由你的同步脚本从禁选名单并入 model-caps.json 的 disabled 字段
+       disabled: cap?.disabled ?? false,
++      // 冷却态（自动、到期自愈）——ModelSelector 据此渲**禁止图标但不加删除线**，
++      // 与上方人工禁用名单的删除线严格区分（语义分层，见 components/ModelSelector.tsx）。
++      cooldown: cd ? { until: cd.until, reason: cd.reason } : null,
+     };
+   }).sort(compareModelEntries);
+   for (const m of visible) {
+diff --git a/components/AgentsConfig.tsx b/components/AgentsConfig.tsx
+index 4500297..444face 100644
+--- a/components/AgentsConfig.tsx
++++ b/components/AgentsConfig.tsx
+@@ -196,6 +196,8 @@ export function AgentsConfig({
+     rateFree: model.rateFree,
+     // 同 ChatInput：modelOptions → ModelSelectorOption 的必经关口，禁用标记必须透传。
+     disabled: Boolean(model.disabled),
++    // 冷却态（自动、到期自愈）：透传后本组件渲禁止图标、不渲删除线。
++    cooldown: model.cooldown ?? null,
+   })), [modelOptions]);
+ 
+   const loadProfiles = useCallback(async (preferredKey?: string) => {
+diff --git a/components/ChatInput.tsx b/components/ChatInput.tsx
+index fa2b315..f15bdab 100644
+--- a/components/ChatInput.tsx
++++ b/components/ChatInput.tsx
+@@ -54,7 +54,7 @@ interface Props {
+   model?: { provider: string; modelId: string } | null;
+   isAutoModelSelection?: boolean;
+   modelNames?: Record<string, string>;
+-  modelList?: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[];
++  modelList?: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean; cooldown?: { until: number; reason?: string } | null }[];
+   modelError?: string | null;
+   /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
+   modelScopeWarnings?: string[];
+@@ -563,7 +563,7 @@ export function ModelErrorBanner({ error }: { error?: string | null }) {
+ /** True when the selected model is known to accept image input (#584). Unknown modality info never blocks the user. */
+ export function modelSupportsImageInput(
+   model: { provider: string; modelId: string } | null | undefined,
+-  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[] | undefined
++  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean; cooldown?: { until: number; reason?: string } | null }[] | undefined
+ ): boolean {
+   if (!model) return true;
+   const entry = modelList?.find((m) => m.provider === model.provider && m.id === model.modelId);
+@@ -1603,6 +1603,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+         // modelList → ModelSelectorOption 的**必经关口**，漏传则删除线与
+         // 禁止图标均不出现（已踩过一次：两端都正常、只有中间断链）。
+         disabled: Boolean(m.disabled),
++        // 冷却态同理：/api/models 已下发，但漏传则禁止图标不出现。
++        cooldown: m.cooldown ?? null,
+       }));
+     }
+     return Object.entries(modelNames ?? {}).map(([modelId, name]) => ({
+diff --git a/components/ModelSelector.tsx b/components/ModelSelector.tsx
+index 4bd38bd..eb50ac5 100644
+--- a/components/ModelSelector.tsx
++++ b/components/ModelSelector.tsx
+@@ -18,12 +18,55 @@ export interface ModelSelectorOption {
+   /** 人工禁用（额度耗尽/渠道故障）——渲染删除线且不可点选。
+    *  数据源：禁选名单 → 同步脚本 → model-caps.json 的 disabled → /api/models。 */
+   disabled?: boolean;
++  /** 冷却期（router 运行态熔断：6004 用量窗/429 限流/上游不可用）——**只渲禁止图标，不加删除线**。
++   *  数据源：~/.local/state/model-router/error-state.json → /api/models（实时读，快照式）。
++   *  为何与 `disabled` 分开两个字段（语义分层，勿合并）：
++   *    disabled = 人工 + 临时（须手动删禁用名单行）⇒ 删除线 =「需要人处理」；
++   *    cooldown = 自动 + 自愈（到期即恢复，无需任何操作）⇒ 琥珀 ⊘ =「等一会儿就好」。
++   *  若混同，维护者看到删除线会以为要手工清理，而实际上到点自动恢复。 */
++  cooldown?: { until: number; reason?: string } | null;
+ }
+ 
+ const CAP_IMAGES_TITLE = "支持图像输入（多模态视觉）：可直接给该模型发送图片";
+ const CAP_REASONING_TITLE = "支持思考/推理模式：回答前会先推理（可能产生 reasoning 内容）";
+ const DISABLED_TITLE = "该模型已人工禁用（额度耗尽或渠道故障）——在禁选名单中，恢复后由巡检确认并移除";
+ 
++/** 冷却 tooltip 的固定前缀——必须写明「自动恢复、无需操作」，否则与人工禁用混淆。 */
++const COOLDOWN_TITLE_BASE = "冷却中（router 自动熔断，**非人工禁用**）——到期自动恢复，无需任何操作";
++const COOLDOWN_REASON_TEXT: Record<string, string> = {
++  usage_window: "上游用量窗口限流（6004）",
++  rate_limit: "上游频率限流（429）",
++  unavailable: "上游判定模型不可用",
++};
++/** 到期判定的重算间隔。冷却粒度是分钟级（上游声明的配额重置时刻），
++ *  30s 精度足够，又不会在长列表常开时空转。 */
++const COOLDOWN_TICK_MS = 30_000;
++
++function formatCooldownUntil(until: number): string {
++  const d = new Date(until);
++  const p = (n: number) => String(n).padStart(2, "0");
++  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
++}
++
++function cooldownTitle(cooldown: { until: number; reason?: string }): string {
++  const why = cooldown.reason
++    ? COOLDOWN_REASON_TEXT[cooldown.reason] ?? cooldown.reason
++    : "上游临时不可用";
++  return `${COOLDOWN_TITLE_BASE}\n原因：${why}\n预计恢复：${formatCooldownUntil(cooldown.until)}`;
++}
++
++/** 每 intervalMs 推进一次「现在」——冷却到期的**自愈**靠它。
++ *  /api/models 下发的是快照（until 是绝对时刻），若不重渲，标志会一直挂到
++ *  下次刷新（时机不确定）⇒ 表现为「已恢复的模型仍不可点」，比不显示更糟。 */
++function useNow(intervalMs: number): number {
++  const [now, setNow] = useState(() => Date.now());
++  useEffect(() => {
++    const id = setInterval(() => setNow(Date.now()), intervalMs);
++    return () => clearInterval(id);
++  }, [intervalMs]);
++  return now;
++}
++
+ /** 能力图标：eye 支持图像输入 / brain 支持推理。内联 SVG，随主题自适应（lucide ISC）。 */
+ function ModelCapIcons({ images, reasoning }: { images?: boolean; reasoning?: boolean }) {
+   if (!images && !reasoning) return null;
+@@ -106,6 +149,42 @@ function ModelDisabledIcon({ reason }: { reason?: string }) {
+   );
+ }
+ 
++/**
++ * 冷却图标：与禁用名单禁止图标**同形状、异色**（琥珀）。
++ * 为何不换形状：形状表达「不可选」，颜色表达「临时 vs 人工」——复用形状可让
++ * 两类不可用一眼区分（同形状红/黄），又不必在 11px 尺寸下再认一个新图标。
++ */
++function ModelCooldownIcon({ cooldown }: { cooldown: { until: number; reason?: string } }) {
++  const title = cooldownTitle(cooldown);
++  const svgProps = {
++    width: 11,
++    height: 11,
++    viewBox: "0 0 24 24",
++    fill: "none",
++    stroke: "currentColor",
++    strokeWidth: 2,
++    strokeLinecap: "round" as const,
++    strokeLinejoin: "round" as const,
++    "aria-hidden": true,
++  };
++  return (
++    <span
++      title={title}
++      aria-label={title}
++      style={{
++        display: "inline-flex",
++        flexShrink: 0,
++        color: "var(--warning, #d97706)",
++      }}
++    >
++      <svg {...svgProps} role="img" aria-label={title}>
++        <circle cx="12" cy="12" r="9" />
++        <path d="m5.6 5.6 12.8 12.8" />
++      </svg>
++    </span>
++  );
++}
++
+ /** 费用倍率标签：数字=上游倍率、免费=0 倍率档、—=上游未返回定价。 */
+ function ModelRateBadge({ rate, free }: { rate?: number | null; free?: boolean }) {
+   if (rate === undefined) return null;
+@@ -184,6 +263,8 @@ export function ModelSelector({
+   const [open, setOpen] = useState(false);
+   const [anchorRect, setAnchorRect] = useState<{ top: number; right: number; bottom: number; left: number; width: number } | null>(null);
+   const [filter, setFilter] = useState("");
++  // 冷却是否仍然生效由**前端**按 until 判定（服务端只给快照，见 ModelSelectorOption.cooldown）。
++  const now = useNow(COOLDOWN_TICK_MS);
+   const locked = disabled || busy;
+   const sortedOptions = useMemo(() => [...options].sort(compareModelOptions), [options]);
+   const filteredOptions = filterModelOptions(sortedOptions, filter);
+@@ -432,12 +513,20 @@ export function ModelSelector({
+                   )}
+                   {group.options.map((option) => {
+                     const disabled = Boolean(option.disabled);
++                    // 已过 until 的条目视为无冷却：与服务端 loadCooldowns 的丢弃逻辑对账，
++                    // 避免「服务端已不挡候选链、UI 还禁着点」的错位。
++                    const cooldown = option.cooldown && option.cooldown.until > now ? option.cooldown : null;
++                    const blocked = disabled || Boolean(cooldown);
+                     return (
+                       <div
+                         key={`${option.provider}:${option.modelId}`}
+-                        aria-disabled={disabled || undefined}
+-                        title={disabled ? DISABLED_TITLE : undefined}
+-                        style={disabled ? { opacity: 0.55, cursor: "not-allowed", pointerEvents: "none" } : undefined}
++                        aria-disabled={blocked || undefined}
++                        title={disabled ? DISABLED_TITLE : cooldown ? cooldownTitle(cooldown) : undefined}
++                        // 冷却项比禁用名单项浅一档透明度（0.72 vs 0.55）：同样是「不可点」，
++                        // 但视觉上明确传达「临时」而非「已定性」。
++                        style={blocked
++                          ? { opacity: disabled ? 0.55 : 0.72, cursor: "not-allowed", pointerEvents: "none" }
++                          : undefined}
+                       >
+                       <SelectorRow
+                         active={option.modelId === value?.modelId && option.provider === value?.provider}
+@@ -456,6 +545,7 @@ export function ModelSelector({
+                           rate={option.rate}
+                           rateFree={option.rateFree}
+                           disabled={disabled}
++                          cooldown={cooldown}
+                         />
+                       </SelectorRow>
+                       </div>
+@@ -471,13 +561,14 @@ export function ModelSelector({
+   );
+ }
+ 
+-function OptionLabel({ label, supportsImages, supportsReasoning, rate, rateFree, disabled }: {
++function OptionLabel({ label, supportsImages, supportsReasoning, rate, rateFree, disabled, cooldown }: {
+   label: string;
+   supportsImages?: boolean;
+   supportsReasoning?: boolean;
+   rate?: number | null;
+   rateFree?: boolean;
+   disabled?: boolean;
++  cooldown?: { until: number; reason?: string } | null;
+ }) {
+   // 外层撑满整行，图标与徽标贴右；文字过长时先省略文字、不挤压徽标。
+   // 禁用项：文字加删除线（不遮图标/徽标，保留能力信息供参考）。
+@@ -487,10 +578,14 @@ function OptionLabel({ label, supportsImages, supportsReasoning, rate, rateFree,
+         title={label}
+         style={{
+           flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
++          // 删除线**只**属人工禁用名单：删除线的隐含语义是「这条需要人去处理」，
++          // 而冷却是自动到期自愈——若一并加线，会让维护者以为要手工清理。
+           ...(disabled ? { textDecoration: "line-through" } : {}),
+         }}
+       >{label}</span>
+       {disabled ? <ModelDisabledIcon /> : null}
++      {/* 同为禁用名单 + 冷却时只显红色图标：禁用名单的处置优先级更高（需人工）。 */}
++      {cooldown && !disabled ? <ModelCooldownIcon cooldown={cooldown} /> : null}
+       <ModelCapIcons images={supportsImages} reasoning={supportsReasoning} />
+       <ModelRateBadge rate={rate} free={rateFree} />
+     </>
+diff --git a/lib/models-cache.ts b/lib/models-cache.ts
+index 0c4b1e1..6cc25de 100644
+--- a/lib/models-cache.ts
++++ b/lib/models-cache.ts
+@@ -1,6 +1,6 @@
+ export interface ModelsData {
+   models: Record<string, string>;
+-  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean }[];
++  modelList: { id: string; name: string; provider: string; input?: string[]; reasoning?: boolean; rate?: number | null; rateFree?: boolean; disabled?: boolean; cooldown?: { until: number; reason?: string } | null }[];
+   defaultModel: { provider: string; modelId: string } | null;
+   /** Resolved thinking level a new session starts with when the user has not picked one. */
+   defaultThinkingLevel: string | null;

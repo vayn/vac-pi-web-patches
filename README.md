@@ -16,9 +16,13 @@
 | 0003 | `fix-pi-web-height-maxHeight` | fix | Long questions no longer squeeze the options area: the dialog gets an explicit height so it resolves to a definite size |
 | 0004 | `feat-pi-web-model-caps-rate-badges` | feat | Model capability icons, rate badges and a **disabled-model marker**: `/api/models` reads a `model-caps.json` sidecar and renders reasoning/image capability icons, a rate badge, and — for models an operator has taken out of rotation — a strikethrough plus a no-entry icon (unselectable) |
 | 0005 | `feat-pi-web-table-zoom` | feat | Markdown table **zoom button and fullscreen view**. The button floats at the table's top-right (always visible on touch); in fullscreen, `<dialog>` cells **wrap automatically**, falling back to horizontal scrolling only when a table has too many columns to fit |
+| 0006 | `feat-pi-web-model-cooldown-badge` | feat | **Cooldown marker, deliberately without a strikethrough**: `/api/models` reads the router's live `error-state.json` and marks models that are temporarily cooling down (upstream rate/usage limits, upstream unavailable). A cooling-down model gets an **amber no-entry icon and no strikethrough**, while an operator-disabled model keeps the red icon **and** the strikethrough — so "wait a moment" and "someone must act" stay visually distinct |
+| 0007 | `feat-pi-web-model-picker-refresh-on-open` | feat | **Opening the model picker refreshes the list**: the cooldown state lives in another process, so the picker used to show a session-start snapshot. Opening the picker now bumps the existing model-refresh key (the same path the catalog refresh uses), so a cooldown that started mid-session shows up right when you pick a model |
 
-> **Not every patch is screenshot-able.** 0002 only changes `.gitignore`, so it has no
-> visual surface and no screenshot. The other four are shown below.
+> **Not every patch is screenshot-able.** 0002 only changes `.gitignore`, and 0007 is
+> behavioural (nothing new is on screen until you open the picker), so neither has a
+> screenshot. 0006 renders inside the same picker as 0004, so the 0004 screenshots show
+> the surface it appears on; a dedicated cooldown screenshot is not included yet.
 
 ## 2. Effect screenshots
 
@@ -113,7 +117,7 @@ The patches apply by **line-context**, so they are tightly bound to the upstream
 version. `git apply --check` failing against a different baseline is **expected
 behaviour, not a defect** — re-issue the patches rather than forcing `--3way`.
 
-## 6. Optional data dependency of 0004
+## 6. Optional data dependency of 0004 and 0006
 
 The rate badges and capability icons rendered by 0004 come from two sources:
 
@@ -138,10 +142,22 @@ selector row — the route maps caps onto the model list, and each consumer maps
 while both ends still look correct; that is exactly the failure mode to guard against when
 you extend this.
 
+- **Cooldown state (0006)**: unlike the two sources above, cooldown is read **live** from
+  the router's `error-state.json` in the agent state directory (`<state dir>/model-router/`,
+  overridable by the router's own state-dir environment variable). An entry is
+  `{"<channel>/<model>": {"until": <epoch ms>, "reason": "..."}}`; only entries whose `until`
+  is still in the future are surfaced, and expired entries are dropped **on the server side**
+  as well as in the browser, so a cooling-down model never stays blocked past its deadline.
+  With no such file (or no router at all) nothing is marked and the picker behaves exactly as
+  before — the feature is inert. Cooldown is **auto-expiring**; the `disabled` flag is
+  **operator-managed**. That is why they render differently (amber icon vs. red icon +
+  strikethrough) and why 0006 deliberately does **not** add a strikethrough.
+
 ## 7. Changelog
 
 | Version | Change |
 |---|---|
+| 1.3.0 | Two new patches: **0006** cooldown marker in the model picker (amber no-entry icon, no strikethrough) fed by the router's live `error-state.json`, and **0007** refresh-on-open for the model picker. Series is now 7 patches (0001–0007); verified to replay byte-identically onto pi-web v0.10.0 |
 | 1.2.0 | No functional change: comment wording only (the applied tree is identical to 1.1.0 apart from comments) |
 | 1.1.0 | 0004 extended: `disabled` flag from the `model-caps.json` sidecar renders a strikethrough **and** a no-entry icon, and such models cannot be selected |
 | 1.0.0 | First public release: 5 patches (0001–0005) against pi-web v0.10.0 |

@@ -1,0 +1,159 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pi-web contributor <contributor@example.com>
+Date: Fri, 09 Oct 2026 10:25:57 +0800
+Subject: [PATCH 7/7] feat(pi-web): 选单开单即刷新模型列表（拾起运行态冷却）
+
+维护者指令 2026-10-08（遗留项「冷却开始无感知」的第一性解法）。
+
+【问题】冷却/熔断状态由**另一个进程**写（router 扩展 → error-state.json），
+前端只有在会话开始/目录刷新时拉一次 /api/models，选单里持有的 modelList 是
+会话开始时的快照。后果：模型在会话中途撞 6004 被熔断，维护者打开选单**看不到
+任何标记**，选中后又被 router 静默换走——即补丁 0006 只能显示「已下发」的冷却，
+无法反映「刚刚发生的冷却」。
+
+【为何是开单刷一次，而不是轮询】
+  · 冷却的开始必然伴随一次真实模型调用失败，而调用发生在选单**关闭**时
+    （发消息的回合内）；故选单打开期间唯一的新鲜度需求就是「打开那一刻的数据」。
+  · 开单刷一次即可覆盖，且空闲时零请求成本；改成轮询等于为一个未观测到的场景
+    常驻请求循环（且在 3GB 内存的宿主上与构建/服务抢资源）。
+
+【复用而非新建】拉取路径仓内**已存在**一条：modelsRefreshKey → useAgentSession
+effect → loadModels()（目录刷新 EnabledModelsSection 已在用它）。故本补丁只
+透传一个回调，不新增接口、不新增状态、不新增第二套刷新逻辑（DRY；若另起一条
+刷新路径，迟早与loadModels 的行为漂移）。
+  AppShell.requestModelsRefresh（bump 既有 key）→ ChatWindow.onRequestModelsRefresh
+  → ChatInput.onModelListRefresh → ModelSelector.onOpenChange（开单沿触发）
+
+回滚：git revert 本补丁（0006 的显示能力不受影响，仅回到“无开单刷新”）。
+
+ components/AppShell.tsx      |  6 ++++++
+ components/ChatInput.tsx     |  3 +++
+ components/ChatWindow.tsx    |  3 +++
+ components/ModelSelector.tsx | 16 ++++++++++++++++
+ 4 files changed, 28 insertions(+)
+
+diff --git a/components/AppShell.tsx b/components/AppShell.tsx
+index c50b18f..55807f5 100644
+--- a/components/AppShell.tsx
++++ b/components/AppShell.tsx
+@@ -173,6 +173,11 @@ export function AppShell() {
+   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
+   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
++  // 模型列表新鲜度：目录刷新（EnabledModelsSection）与选单开单都会 bump 这个 key，
++  // useAgentSession 的 effect 依赖它重新拉 /api/models。
++  // 【为何统一为一个 key】拉取路径只有一条（loadModels），新增需求走同一个 key
++  // 即可，不必新开接口或新开状态——DRY，且避开“第二条刷新路径与第一条行为不一致”。
++  const requestModelsRefresh = useCallback(() => setModelsRefreshKey((key) => key + 1), []);
+   const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
+   const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
+   const [projectTrustBusy, setProjectTrustBusy] = useState(false);
+@@ -2351,6 +2356,7 @@ export function AppShell() {
+               onSessionCreated={handleSessionCreated}
+               onSessionForked={handleSessionForked}
+               modelsRefreshKey={modelsRefreshKey}
++              onRequestModelsRefresh={requestModelsRefresh}
+               chatInputRef={chatInputRef}
+               onBranchDataChange={handleBranchDataChange}
+               onSystemPromptChange={handleSystemPromptChange}
+diff --git a/components/ChatInput.tsx b/components/ChatInput.tsx
+index f15bdab..9b69a8f 100644
+--- a/components/ChatInput.tsx
++++ b/components/ChatInput.tsx
+@@ -59,6 +59,8 @@ interface Props {
+   /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
+   modelScopeWarnings?: string[];
+   onModelChange?: (provider: string, modelId: string) => void;
++  /** 选单打开时通知上层拉取新鲜模型数据（冷却/熔断等运行态靠重新请求才可见）。 */
++  onModelListRefresh?: () => void;
+   modelSwitching?: boolean;
+   /** The model new sessions start with, starred in the model selector. */
+   defaultModel?: { provider: string; modelId: string } | null;
+@@ -586,7 +588,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
+ 
+ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
+-  defaultModel, onSetDefaultModel,
++  defaultModel, onSetDefaultModel, onModelListRefresh,
+   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
+   thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
+   savedDefaultThinkingLevel, onSetDefaultThinkingLevel,
+@@ -2408,6 +2410,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+                 isAutoSelection={isAutoModelSelection}
+                 defaultValue={defaultModel}
+                 onSetDefault={onSetDefaultModel}
++                onOpenChange={onModelListRefresh ? () => onModelListRefresh() : undefined}
+               />
+             )}
+           </div>
+diff --git a/components/ChatWindow.tsx b/components/ChatWindow.tsx
+index b3c6cd2..dc0b0fb 100644
+--- a/components/ChatWindow.tsx
++++ b/components/ChatWindow.tsx
+@@ -49,6 +49,8 @@ interface Props {
+   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
+   onSessionForked?: (newSessionId: string) => void;
+   modelsRefreshKey?: number;
++  /** 请求拉取新鲜模型列表（转交 useAgentSession 的 reloadModelsQuietly 路径）。 */
++  onRequestModelsRefresh?: () => void;
+   chatInputRef?: React.RefObject<ChatInputHandle | null>;
+   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void, locked: boolean) => void;
+   onSystemPromptChange?: (prompt: string | null) => void;
+@@ -227,7 +229,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
+   );
+ }
+ 
+-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
++export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, onRequestModelsRefresh, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+   const { t } = useI18n();
+   const isMobile = useIsMobile();
+   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
+@@ -861,6 +863,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
+       modelError={modelError}
+       modelScopeWarnings={modelScopeWarnings}
+       onModelChange={handleModelChange}
++      onModelListRefresh={onRequestModelsRefresh}
+       modelSwitching={modelSwitching}
+       defaultModel={defaultModel}
+       onSetDefaultModel={handleSetDefaultModel}
+diff --git a/components/ModelSelector.tsx b/components/ModelSelector.tsx
+index eb50ac5..0293c79 100644
+--- a/components/ModelSelector.tsx
++++ b/components/ModelSelector.tsx
+@@ -218,6 +218,10 @@ interface ModelSelectorProps {
+   defaultValue?: { provider: string; modelId: string } | null;
+   /** Shows a star on every row that saves it as the default. */
+   onSetDefault?: (provider: string, modelId: string) => void;
++  /** 下拉开合回调（供上层在“用户即将选模型”时拉取新鲜数据）。
++   *  动机：冷却/熔断是**另一个进程**（router 扩展）写的运行态，只有重新请求
++   *  /api/models 才会变；选单持有的 modelList 是会话开始时的快照。 */
++  onOpenChange?: (open: boolean) => void;
+ }
+ 
+ const MODEL_FILTER_THRESHOLD = 8;
+@@ -255,6 +259,7 @@ export function ModelSelector({
+   placement = "up",
+   defaultValue,
+   onSetDefault,
++  onOpenChange,
+ }: ModelSelectorProps) {
+   const { t } = useI18n();
+   const isMobile = useIsMobile();
+@@ -304,6 +309,17 @@ export function ModelSelector({
+     setFilter("");
+   }, [locked]);
+ 
++  // 开单即拉新鲜数据（不做轮询）。
++  // 【为何只需“开单一次”而非轮询】冷却的开始必然伴随一次真实的模型调用失败，
++  // 而调用发生在选单**关闭**时（发消息的回合里）；因此选单打开期间唯一的新鲜度
++  // 需求就是“打开那一刻的数据”。开单刷一次即可覆盖，且空闲时零成本——
++  // 若改成轮询，等于为一个尚未观测到的场景常驻一个请求循环。
++  useEffect(() => {
++    if (open) onOpenChange?.(true);
++    // 只在开/关沿触发；close 沿无订阅者，不通知（避免无意义的 rerender）。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [open]);
++
+   const buttonStyle: CSSProperties = variant === "field"
+     ? {
+         display: "flex",
