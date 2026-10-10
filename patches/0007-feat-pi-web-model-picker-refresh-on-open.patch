@@ -3,9 +3,9 @@ From: pi-web contributor <contributor@example.com>
 Date: Fri, 09 Oct 2026 10:25:57 +0800
 Subject: [PATCH 7/7] feat(pi-web): 选单开单即刷新模型列表（拾起运行态冷却）
 
-维护者指令 2026-10-08（遗留项「冷却开始无感知」的第一性解法）。
+设计动机：遗留项「冷却开始无感知」的第一性解法。
 
-【问题】冷却/熔断状态由**另一个进程**写（router 扩展 → error-state.json），
+【问题】冷却/熔断状态由**另一个进程**写（模型路由扩展 → error-state.json），
 前端只有在会话开始/目录刷新时拉一次 /api/models，选单里持有的 modelList 是
 会话开始时的快照。后果：模型在会话中途撞 6004 被熔断，维护者打开选单**看不到
 任何标记**，选中后又被 router 静默换走——即补丁 0006 只能显示「已下发」的冷却，
@@ -31,12 +31,22 @@ effect → loadModels()（目录刷新 EnabledModelsSection 已在用它）。�
  components/ChatWindow.tsx    |  3 +++
  components/ModelSelector.tsx | 16 ++++++++++++++++
  4 files changed, 28 insertions(+)
+[v0.11.0 适配] 上游 ChatWindow 签名新增 4 个 props（newSessionContextBar /
+initialNewSessionChoices / onNewSessionChoicesChange / onFilesUploaded），
+原 hunk #2 上下文失配；本补丁按语义重新对齐，onRequestModelsRefresh 仍插在
+modelsRefreshKey 之后，其余 3 文件 hunk 未变。
+---
+ components/AppShell.tsx      |  32 ++++++++++++++++++++++++++++++--
+ components/ChatInput.tsx     |  26 ++++++++++++++++++++++++--
+ components/ChatWindow.tsx    |  21 ++++++++++++++++++++-
+ components/ModelSelector.tsx |  16 ++++++++++++++++
+ 4 files changed, 90 insertions(+), 5 deletions(-)
 
 diff --git a/components/AppShell.tsx b/components/AppShell.tsx
-index c50b18f..55807f5 100644
+index 5dccaba..b301998 100644
 --- a/components/AppShell.tsx
 +++ b/components/AppShell.tsx
-@@ -173,6 +173,11 @@ export function AppShell() {
+@@ -211,6 +211,11 @@ export function AppShell() {
    const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
    const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
    const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
@@ -48,7 +58,7 @@ index c50b18f..55807f5 100644
    const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
    const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
    const [projectTrustBusy, setProjectTrustBusy] = useState(false);
-@@ -2351,6 +2356,7 @@ export function AppShell() {
+@@ -2484,6 +2489,7 @@ export function AppShell() {
                onSessionCreated={handleSessionCreated}
                onSessionForked={handleSessionForked}
                modelsRefreshKey={modelsRefreshKey}
@@ -57,10 +67,10 @@ index c50b18f..55807f5 100644
                onBranchDataChange={handleBranchDataChange}
                onSystemPromptChange={handleSystemPromptChange}
 diff --git a/components/ChatInput.tsx b/components/ChatInput.tsx
-index f15bdab..9b69a8f 100644
+index 76d2fde..493f3b0 100644
 --- a/components/ChatInput.tsx
 +++ b/components/ChatInput.tsx
-@@ -59,6 +59,8 @@ interface Props {
+@@ -60,6 +60,8 @@ interface Props {
    /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
    modelScopeWarnings?: string[];
    onModelChange?: (provider: string, modelId: string) => void;
@@ -69,7 +79,7 @@ index f15bdab..9b69a8f 100644
    modelSwitching?: boolean;
    /** The model new sessions start with, starred in the model selector. */
    defaultModel?: { provider: string; modelId: string } | null;
-@@ -586,7 +588,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
+@@ -632,7 +634,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
  
  export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
    onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
@@ -78,7 +88,7 @@ index f15bdab..9b69a8f 100644
    onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
    thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
    savedDefaultThinkingLevel, onSetDefaultThinkingLevel,
-@@ -2408,6 +2410,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+@@ -2430,6 +2432,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                  isAutoSelection={isAutoModelSelection}
                  defaultValue={defaultModel}
                  onSetDefault={onSetDefaultModel}
@@ -87,10 +97,10 @@ index f15bdab..9b69a8f 100644
              )}
            </div>
 diff --git a/components/ChatWindow.tsx b/components/ChatWindow.tsx
-index b3c6cd2..dc0b0fb 100644
+index c0abbc1..ad4f83a 100644
 --- a/components/ChatWindow.tsx
 +++ b/components/ChatWindow.tsx
-@@ -49,6 +49,8 @@ interface Props {
+@@ -56,6 +56,8 @@ interface Props {
    onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
    onSessionForked?: (newSessionId: string) => void;
    modelsRefreshKey?: number;
@@ -99,16 +109,16 @@ index b3c6cd2..dc0b0fb 100644
    chatInputRef?: React.RefObject<ChatInputHandle | null>;
    onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void, locked: boolean) => void;
    onSystemPromptChange?: (prompt: string | null) => void;
-@@ -227,7 +229,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
+@@ -254,7 +256,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
    );
  }
  
--export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
-+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, onRequestModelsRefresh, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
++export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, onRequestModelsRefresh, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
    const { t } = useI18n();
    const isMobile = useIsMobile();
    const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
-@@ -861,6 +863,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
+@@ -925,6 +927,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
        modelError={modelError}
        modelScopeWarnings={modelScopeWarnings}
        onModelChange={handleModelChange}
@@ -117,7 +127,7 @@ index b3c6cd2..dc0b0fb 100644
        defaultModel={defaultModel}
        onSetDefaultModel={handleSetDefaultModel}
 diff --git a/components/ModelSelector.tsx b/components/ModelSelector.tsx
-index eb50ac5..0293c79 100644
+index 39984e7..698211c 100644
 --- a/components/ModelSelector.tsx
 +++ b/components/ModelSelector.tsx
 @@ -218,6 +218,10 @@ interface ModelSelectorProps {
@@ -125,7 +135,7 @@ index eb50ac5..0293c79 100644
    /** Shows a star on every row that saves it as the default. */
    onSetDefault?: (provider: string, modelId: string) => void;
 +  /** 下拉开合回调（供上层在“用户即将选模型”时拉取新鲜数据）。
-+   *  动机：冷却/熔断是**另一个进程**（router 扩展）写的运行态，只有重新请求
++   *  动机：冷却/熔断是**另一个进程**（模型路由扩展）写的运行态，只有重新请求
 +   *  /api/models 才会变；选单持有的 modelList 是会话开始时的快照。 */
 +  onOpenChange?: (open: boolean) => void;
  }
@@ -157,3 +167,6 @@ index eb50ac5..0293c79 100644
    const buttonStyle: CSSProperties = variant === "field"
      ? {
          display: "flex",
+
+-- 
+2.47.3

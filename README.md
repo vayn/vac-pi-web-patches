@@ -1,6 +1,6 @@
 # pi-web-patches — an enhancement patch series for pi-web
 
-> Upstream baseline: [@agegr/pi-web](https://github.com/agegr/pi-web) **v0.10.0** (MIT).
+> Upstream baseline: [@agegr/pi-web](https://github.com/agegr/pi-web) **v0.11.0** (MIT).
 > This project is **not** a Pi extension. It is a **patch series** against pi-web
 > (ordered `git format-patch` numbering), applied as working-tree state so the
 > upstream commit history is never rewritten.
@@ -47,7 +47,8 @@ Collapsed state shows only a chevron, the summary's first line and the timestamp
 
 Left: before (`maxHeight` alone does not give the dialog a definite height, so the long
 question compresses the options — options B and C are cut off). Right: after
-(`height: min(760px, 100%)`, all options visible).
+(`height`, all options visible). The height follows the dialog's own full-screen
+toggle, so a maximized dialog is not pinned to 760px.
 
 ![dialog height](docs/screenshots/en/0003-dialog-height.png)
 
@@ -96,7 +97,7 @@ orphan commits, and clones are reproducible.
 
 ```bash
 # Fetch the upstream baseline
-git clone --depth 1 -b v0.10.0 https://github.com/agegr/pi-web
+git clone --depth 1 -b v0.11.0 https://github.com/agegr/pi-web
 cd pi-web
 
 # Apply in order (the numbering is the order)
@@ -105,6 +106,10 @@ for p in /path/to/pi-web-patches/patches/*.patch; do
 done
 ```
 
+> The `[PATCH n/5]` marker inside each patch `Subject:` is an artifact of how the
+> series was first exported; the file names (`0001`…`0007`) are the authoritative
+> order. The series now has seven patches.
+>
 > Use `git apply`, not `git am`: mailinfo is skipped, which preserves whitespace
 > semantics such as CRLF exactly.
 
@@ -157,6 +162,7 @@ you extend this.
 
 | Version | Change |
 |---|---|
+| 1.4.0 | **Rebased onto upstream v0.11.0.** Patches 0003 and 0007 are re-issued against the new baseline; the other five are unchanged in content. 0003 now sets `height` alongside the upstream `full` (maximize) state so the new maximize toggle keeps working, and 0007 is realigned to the `ChatWindow` signature that upstream changed. Also corrects 0003's explanation of the mechanism: it claimed a `max-height: 50%` that does not exist in the dialog (the title row uses `maxHeight: "50vh"`); the patch itself is unchanged, only the description was wrong. |
 | 1.3.0 | Two new patches: **0006** cooldown marker in the model picker (amber no-entry icon, no strikethrough) fed by the router's live `error-state.json`, and **0007** refresh-on-open for the model picker. Series is now 7 patches (0001–0007); verified to replay byte-identically onto pi-web v0.10.0 |
 | 1.2.0 | No functional change: comment wording only (the applied tree is identical to 1.1.0 apart from comments) |
 | 1.1.0 | 0004 extended: `disabled` flag from the `model-caps.json` sidecar renders a strikethrough **and** a no-entry icon, and such models cannot be selected |

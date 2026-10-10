@@ -1,6 +1,6 @@
 # pi-web-patches —— pi-web 增强补丁集
 
-> 上游基线：[@agegr/pi-web](https://github.com/agegr/pi-web) **v0.10.0**（MIT）。
+> 上游基线：[@agegr/pi-web](https://github.com/agegr/pi-web) **v0.11.0**（MIT）。
 > 本项目**不是** Pi 扩展，而是针对 pi-web 的**补丁系列**（`git format-patch` 有序编号），
 > 以工作树态应用，不改写上游提交历史。
 
@@ -38,7 +38,8 @@
 ### 0003 —— 长提问不再挤扁选项区
 
 左：修复前（仅 `maxHeight` 不构成确定高度，长提问压缩选项区，方案 B/C 被截断）；
-右：修复后（`height: min(760px, 100%)`，三个方案均完整可见）。
+右：修复后（`height`，三个方案均完整可见）。该 height 跟随对话框自身的全屏开关，
+最大化时不会被 760px 卡住。
 
 ![对话框高度](docs/screenshots/zh-CN/0003-dialog-height.png)
 
@@ -80,7 +81,7 @@
 
 ```bash
 # 取上游基线
-git clone --depth 1 -b v0.10.0 https://github.com/agegr/pi-web
+git clone --depth 1 -b v0.11.0 https://github.com/agegr/pi-web
 cd pi-web
 
 # 依次应用（顺序即编号顺序）
@@ -89,6 +90,8 @@ for p in /path/to/pi-web-patches/patches/*.patch; do
 done
 ```
 
+> 各补丁 `Subject:` 里的 `[PATCH n/5]` 标记是本系列初次导出时的残留，以文件名（`0001`…`0007`）为准；本系列现有七个补丁。
+>
 > 用 `git apply` 而非 `git am`：不经 mailinfo，保真 CRLF 等空白语义。
 
 应用后正常构建上游项目即可（pi-web 为 Next.js 应用，构建前需先安装依赖）。
@@ -128,6 +131,7 @@ done
 
 | 版本 | 变更 |
 |---|---|
+| 1.4.0 | **重基到上游 v0.11.0。** 0003 与 0007 按新基线重出，其余五个补丁内容不变。0003 让 `height` 跟随上游新增的全屏（最大化）态，最大化时不再被 760px 卡住；0007 按上游改动过的 `ChatWindow` 签名重新对齐。同时更正 0003 对机制的描述：原文称对话框存在 `max-height: 50%` 约束，实际标题行用的是 `maxHeight: "50vh"`，该约束并不存在——补丁本身未变，错的是说明。 |
 | 1.3.0 | 新增两个补丁：**0006** 模型选单的冷却标记（琥珀色禁止进入图标、不加删除线），数据源为路由器的实时 `error-state.json`；**0007** 选单开单即刷新。系列共 7 个补丁（0001–0007）；已验证可逐字节重放于 pi-web v0.10.0 |
 | 1.2.0 | 无功能变更：仅注释措辞调整（应用后的树与 1.1.0 除注释外完全一致） |
 | 1.1.0 | 0004 扩展：`model-caps.json` 侧车的 `disabled` 标记渲染删除线**与**禁止进入图标，且此类模型不可点选 |

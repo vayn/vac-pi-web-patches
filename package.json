@@ -1,7 +1,7 @@
 {
   "name": "pi-web-patches",
-  "version": "1.3.0",
-  "description": "Enhancement patch series for pi-web v0.10.0: compaction message collapse, pnpm lockfile ignore, dialog height fix, model capability icons + rate badges + disabled-model markers, and markdown table zoom with fullscreen view.",
+  "version": "1.4.0",
+  "description": "Enhancement patch series for pi-web v0.11.0: compaction message collapse, pnpm lockfile ignore, dialog height fix (follows the full-screen state), model capability icons + rate badges + disabled-model markers, markdown table zoom with fullscreen view, model cooldown badge, and model-picker refresh on open.",
   "keywords": [
     "pi-package",
     "pi-web",
@@ -15,7 +15,7 @@
     "README.zh-CN.md"
   ],
   "peerDependencies": {
-    "@agegr/pi-web": "^0.10.0"
+    "@agegr/pi-web": "^0.11.0"
   },
   "peerDependenciesMeta": {
     "@agegr/pi-web": {

@@ -11,26 +11,27 @@ Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
 ---
- components/ChatWindow.tsx | 6 ++++++
- 1 file changed, 6 insertions(+)
+ components/ChatWindow.tsx |   7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
 
 diff --git a/components/ChatWindow.tsx b/components/ChatWindow.tsx
-index 42c4d19..fa3b6c9 100644
+index 09165f3..c0abbc1 100644
 --- a/components/ChatWindow.tsx
 +++ b/components/ChatWindow.tsx
-@@ -1606,6 +1606,12 @@ function ExtensionDialog({
-         style={{
-           pointerEvents: "auto",
-           width: "min(560px, 100%)",
-+          // 用 height 而非 maxHeight：max-height 不构成「确定高度」，
-+          // 导致子元素（标题区）的 max-height:50% 百分比无法解析而失效 ——
-+          // 长提问时标题不限高、撑满弹窗，把选项区压到只剩一行（真机实测
-+          // 选项按钮划不上来）。改为 height 后 50% 可解析，标题限高且自身可滚。
+@@ -1727,6 +1727,13 @@ function ExtensionDialog({
+           // "Full" fills the content region above the composer: the overlay is inset:0 with
+           // 20px padding, so 100% keeps that breathing room without covering the input.
+           width: full ? "100%" : `min(${fitWidth ?? EXTENSION_DIALOG_BASE_WIDTH}px, 100%)`,
++          // 用 height 而非 maxHeight：给 flex 容器一个确定的高度上限，
++          // 使下方 flex:1 1 auto 的选项区（minHeight:0 + overflowY:auto）
++          // 在长提问下能被压缩并自身滚动，而不是把对话框撑到内容高度、
++          // 把选项区压成一行（真机实测选项按钮划不上来）。
 +          // 上游对话框高度行为的依据见相关提交说明
-+          height: "min(760px, 100%)",
-           maxHeight: "min(760px, 100%)",
++          // v0.11.0 适配：上游新增全屏态，height 需跟着 full 走，否则全屏时仍被 760px 卡住。
++          height: full ? "100%" : "min(760px, 100%)",
+           maxHeight: full ? "100%" : "min(760px, 100%)",
            display: "flex",
            flexDirection: "column",
+
 -- 
 2.47.3
-

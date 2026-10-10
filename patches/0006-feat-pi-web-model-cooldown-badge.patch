@@ -73,8 +73,8 @@ index 0724539..715c5e5 100644
 +type CooldownEntry = { until: number; reason?: string };
 +
 +function routerStateDir(): string {
-+  // 与 model-router.ts 的 STATE_DIR 同一解析规则（MODEL_ROUTER_STATE_DIR 优先），
-+  // 否则隔离/测试环境的覆盖会与 router 真源分叉。
++  // 与路由扩展的 STATE_DIR 同一解析规则（MODEL_ROUTER_STATE_DIR 优先），
++  // 否则隔离/测试环境的覆盖会与扩展真源分叉。
 +  return process.env.MODEL_ROUTER_STATE_DIR
 +    || resolve(homedir(), ".local", "state", "model-router");
 +}
